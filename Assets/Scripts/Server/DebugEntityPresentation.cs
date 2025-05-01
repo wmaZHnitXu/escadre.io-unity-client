@@ -9,11 +9,11 @@ public class DebugEntityPresentation : MonoBehaviour, IEntityObserver<DebugEntit
     public void ConnectToEntity(DebugEntity debugEntity)
     {
         _debugEntity = debugEntity;
-        _debugEntity.OnDeathEvent += (Entity entity) => { Destroy(gameObject); };
+        _debugEntity.OnDeathEvent += (Entity entity) => { debugEntity = null; Destroy(gameObject); };
     }
 
     void Update() {
         transform.position = _debugEntity.Position.ToUnityVector();
-        Debug.Log(_debugEntity.IsDead);
+        Debug.Log(_debugEntity.Id);
     }
 }
