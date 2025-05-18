@@ -366,10 +366,11 @@ GameObject:
   - component: {fileID: 709566214}
   - component: {fileID: 709566213}
   - component: {fileID: 709566212}
+  - component: {fileID: 709566215}
   m_Layer: 0
   m_Name: Server
   m_TagString: Untagged
-  m_Icon: {fileID: 0}
+  m_Icon: {fileID: -964228994112308473, guid: 0000000000000000d000000000000000, type: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
@@ -390,7 +391,7 @@ MonoBehaviour:
     DebugPrefab: {fileID: 5066656195200630647, guid: 626aad4cd5210ca4ea444630391c85f5,
       type: 3}
   - EntityType: 1
-    DebugPrefab: {fileID: 5066656195200630647, guid: 09520f4879fa2aa40a339adc3712d12a,
+    DebugPrefab: {fileID: 4379563721390693257, guid: c3f637b77b6d5f24097825ead714a26f,
       type: 3}
   debugObjectParent: {fileID: 0}
 --- !u!114 &709566213
@@ -405,7 +406,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 974e3897416617c45b3d6aebae23c68a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  debugPresentationManager: {fileID: 709566212}
+  entityDebugPresentationManager: {fileID: 709566212}
+  clientDebugPresentationManager: {fileID: 709566215}
 --- !u!4 &709566214
 Transform:
   m_ObjectHideFlags: 0
@@ -414,10 +416,25 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 709566211}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 212.36847, y: 285.22397, z: 0.76990885}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 2
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &709566215
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 709566211}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3b6cee149dab82d408ab4ef79e5d03ce, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  clientConnectionDebugPrefab: {fileID: 5057813000532333446, guid: 0c7a8a43317ac7249a747f9e06c1ab1c,
+    type: 3}
+  clientDebugObjectParent: {fileID: 0}
