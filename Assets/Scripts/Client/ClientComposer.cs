@@ -1,18 +1,18 @@
 // File: Scripts/Client/ClientComposer.cs
 using UnityEngine;
 using Core.Network;
-using Core.Client;
+using Core.Client; // For ClientEntityManager and ClientLevel
 using Core.Logging;
 using Logger = Core.Logging.Logger;
-// Assuming ClientPresentationManager is in the global namespace or its own correct client namespace
-// using Client.Presentation; // If you created one
 
 public class ClientComposer : MonoBehaviour
 {
     [Header("Network")]
-    [SerializeField] private MockNetworkLayer mockNetworkLayer;
+    [SerializeField]
+    [Tooltip("Assign the MockNetworkLayer GameObject from the scene here.")]
+    private MockNetworkLayer mockNetworkLayer;
 
-    [Header("Presentation")] // New Section
+    [Header("Presentation")]
     [SerializeField]
     [Tooltip("Assign the ClientPresentationManager GameObject/Component from the scene here.")]
     private ClientPresentationManager clientPresentationManager;
@@ -25,20 +25,26 @@ public class ClientComposer : MonoBehaviour
     {
         Logger.Log("[ClientComposer] Awake: Initializing Client Logic...");
 
-        if (mockNetworkLayer == null) { /* ... error handling ... */
-            Logger.LogError("[ClientComposer] MockNetworkLayer not assigned!");
+        if (mockNetworkLayer == null)
+        {
+            Logger.LogError("[ClientComposer] MockNetworkLayer not assigned in Inspector! Attempting to find.");
             mockNetworkLayer = FindObjectOfType<MockNetworkLayer>();
-            if (mockNetworkLayer == null) { enabled = false; return; }
+            if (mockNetworkLayer == null)
+            {
+                Logger.LogError("[ClientComposer] MockNetworkLayer not found. Client cannot function.");
+                enabled = false;
+                return;
+            }
+            Logger.LogWarning("[ClientComposer] MockNetworkLayer was found in scene. Please assign it in the Inspector for robustness.");
         }
         _clientNetworkAccess = mockNetworkLayer;
 
         _clientLevel = new ClientLevel();
         _entityManager = new ClientEntityManager(_clientNetworkAccess, _clientLevel);
 
-        // Initialize Presentation System
         if (clientPresentationManager == null)
         {
-            clientPresentationManager = GetComponent<ClientPresentationManager>(); // Attempt to get if on same GO
+            clientPresentationManager = GetComponent<ClientPresentationManager>();
             if (clientPresentationManager == null)
             {
                 Logger.LogWarning("[ClientComposer] ClientPresentationManager not assigned and not found on this GameObject. Visuals will not be created.");
@@ -47,49 +53,62 @@ public class ClientComposer : MonoBehaviour
 
         if (clientPresentationManager != null)
         {
-            clientPresentationManager.Initialize(_clientLevel);
+            clientPresentationManager.Initialize(_clientLevel); // PresentationManager subscribes to ClientLevel events
             Logger.Log("[ClientComposer] ClientPresentationManager initialized.");
         }
 
-        // _clientLevel.OnProxyAdded += HandleProxyAddedToClientLevel; // Logging moved to PresentationManager or specific views
-        // _clientLevel.OnProxyRemoved += HandleProxyRemovedFromClientLevel;
-
-        if (mockNetworkLayer != null) {
+        if (mockNetworkLayer != null)
+        {
+            // Let the mock network layer know this client "exists" for broadcast purposes, if it uses such a list
             mockNetworkLayer.RegisterMockClient(mockNetworkLayer.defaultSendingClientId);
         }
 
         Logger.Log("[ClientComposer] Client Core & Presentation Initialization complete.");
     }
 
-    // private void HandleProxyAddedToClientLevel(IClientProxy proxy) { /* ... logging moved ... */ }
-    // private void HandleProxyRemovedFromClientLevel(IClientProxy proxy) { /* ... logging moved ... */ }
+    /// <summary>
+    /// Unity's Update method, called every frame.
+    /// This is where the client-side core logic loop should be driven.
+    /// </summary>
+    void Update()
+    {
+        if (_clientLevel != null)
+        {
+            _clientLevel.DoUpdate(Time.deltaTime); // <<< CRITICAL ADDITION: Drive the client-side simulation
+        }
+        // Other client-side frame updates can go here (e.g., input processing)
+    }
 
-    public void SimulateSendSetCourse(Core.Primitives.Vector2 destination) { /* ... as before ... */
-        if (_clientNetworkAccess == null) { return; }
+
+    // Example method to simulate sending a command from client
+    public void SimulateSendSetCourse(Core.Primitives.Vector2 destination)
+    {
+        if (_clientNetworkAccess == null)
+        {
+            Logger.LogWarning("[ClientComposer] Cannot send command, network layer not available.");
+            return;
+        }
         Logger.Log($"[ClientComposer] Simulating SendToServer: _SetCourse to {destination}");
-        _clientNetworkAccess.SendToServer(0, MessageType._SetCourse, writer => Core.Network.Proxies.SerializationUtils.WriteVector2(writer, destination));
+        _clientNetworkAccess.SendToServer(
+            0, // Escadre commands often use 0 or a player ID as entity context
+            MessageType._SetCourse,
+            writer => Core.Network.Proxies.SerializationUtils.WriteVector2(writer, destination)
+        );
     }
 
     void OnDestroy()
     {
         Logger.Log("[ClientComposer] OnDestroy: Cleaning up...");
-        // Unsubscribe from ClientLevel events if ClientComposer was directly subscribed
-        // if (_clientLevel != null)
-        // {
-        //     _clientLevel.OnProxyAdded -= HandleProxyAddedToClientLevel;
-        //     _clientLevel.OnProxyRemoved -= HandleProxyRemovedFromClientLevel;
-        // }
-
-        _entityManager?.Dispose();
+        _entityManager?.Dispose(); // This should ideally handle disposing ClientLevel too if owned
         _entityManager = null;
-        _clientLevel?.Dispose();
+        _clientLevel?.Dispose(); // Dispose explicitly if not handled by entityManager or if owned here
         _clientLevel = null;
 
-        if (mockNetworkLayer != null) {
+        if (mockNetworkLayer != null)
+        {
             mockNetworkLayer.UnregisterMockClient(mockNetworkLayer.defaultSendingClientId);
         }
         _clientNetworkAccess = null;
-        // ClientPresentationManager will handle its own OnDestroy and unsubscriptions.
         Logger.Log("[ClientComposer] Client Core Cleanup complete.");
     }
 }

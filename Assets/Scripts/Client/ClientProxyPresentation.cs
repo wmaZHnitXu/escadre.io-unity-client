@@ -1,142 +1,90 @@
 // File: Scripts/Client/Presentation/ClientProxyPresentation.cs
 using UnityEngine;
-using Core.Network; // For IClientProxy
+using Core.Network;
 using Core.Logging;
-using Logger = Core.Logging.Logger; // For Logger (optional, for debug)
 
-/// <summary>
-/// Abstract base class for MonoBehaviour components that visually represent
-/// an IClientProxy on the client.
-/// </summary>
 public abstract class ClientProxyPresentation : MonoBehaviour
 {
     private IClientProxy _targetProxy;
-    public IClientProxy TargetProxy
-    {
-        get => _targetProxy;
-        protected set => _targetProxy = value;
-    }
-
-    public GameObject PrefabReference { get; private set; } // Set by the factory, used for pooling
-
+    public IClientProxy TargetProxy { get => _targetProxy; protected set => _targetProxy = value; }
+    public GameObject PrefabReference { get; private set; }
     public delegate void OnPresentationDisposed(ClientProxyPresentation presentation);
     public event OnPresentationDisposed PresentationDisposedEvent;
-
     private bool _isInitialized = false;
 
-    /// <summary>
-    /// Initializes the presentation with its target proxy and subscribes to relevant events.
-    /// Called by a factory.
-    /// </summary>
+    [Header("Visual Interpolation")]
+    public float PositionInterpolationSpeed = 15f;
+    public float RotationInterpolationSpeed = 15f;
+
+    // No longer need _visualTargetPosition/Rotation here. Will read directly from Proxy.
+    // The proxy's PositionChanged/RotationChanged events will signal that fresh data is available.
+
     public virtual void InitializePresentation(IClientProxy proxy, GameObject prefabRef)
     {
-        if (_isInitialized)
-        {
-            // This might happen if re-initializing from a pool
-            // Ensure previous subscriptions are cleared if any (though Dispose should handle this)
-             if (TargetProxy != null) UnsubscribeFromProxyEvents();
-        }
-
+        if (_isInitialized) { if (TargetProxy != null) UnsubscribeFromProxyEvents(); }
         TargetProxy = proxy ?? throw new System.ArgumentNullException(nameof(proxy));
         PrefabReference = prefabRef ?? throw new System.ArgumentNullException(nameof(prefabRef));
-
         gameObject.name = $"{TargetProxy.EntityType}_{TargetProxy.EntityId}_Presentation";
         gameObject.SetActive(true);
 
+        // Snap transform to initial proxy state immediately
         transform.position = TargetProxy.Position.ToUnityVector();
         transform.rotation = TargetProxy.Rotation.ToUnityQuaternion();
 
         SubscribeToProxyEvents();
-        OnInitialized(); // For derived classes to do specific setup
+        OnInitialized();
         _isInitialized = true;
     }
 
     protected virtual void SubscribeToProxyEvents()
     {
         if (TargetProxy == null) return;
-        TargetProxy.PositionChanged += HandlePositionChanged;
-        TargetProxy.RotationChanged += HandleRotationChanged;
+        // PositionChanged and RotationChanged are subscribed to primarily to know that
+        // the TargetProxy's data has been updated by its internal simulation or a server message.
+        // The presentation's Update() loop will then perform the visual interpolation.
+        TargetProxy.PositionChanged += OnProxyDataChanged; // Generic handler
+        TargetProxy.RotationChanged += OnProxyDataChanged; // Generic handler
         TargetProxy.OnLoudDestructionSignaled += HandleLoudDestruction;
-        TargetProxy.OnDestroyed += HandleProxyVanished; // OnDestroyed means VanishEntity was received
+        TargetProxy.OnDestroyed += HandleProxyVanished;
     }
 
     protected virtual void UnsubscribeFromProxyEvents()
     {
         if (TargetProxy == null) return;
-        TargetProxy.PositionChanged -= HandlePositionChanged;
-        TargetProxy.RotationChanged -= HandleRotationChanged;
+        TargetProxy.PositionChanged -= OnProxyDataChanged;
+        TargetProxy.RotationChanged -= OnProxyDataChanged;
         TargetProxy.OnLoudDestructionSignaled -= HandleLoudDestruction;
         TargetProxy.OnDestroyed -= HandleProxyVanished;
     }
 
-    /// <summary>
-    /// Called after InitializePresentation for derived class specific setup.
-    /// </summary>
     protected virtual void OnInitialized() { }
 
-    protected virtual void HandlePositionChanged(Core.Primitives.Vector3 newPosition)
+    // Generic handler for proxy data changes. We don't need to store the new value here
+    // because Update() will read directly from TargetProxy.Position/Rotation.
+    // This event can be useful if the presentation needs to do something specific
+    // *immediately* when data changes, beyond just starting interpolation.
+    private void OnProxyDataChanged(Core.Primitives.Vector3 newPos) { /* Optional: React immediately */ }
+    private void OnProxyDataChanged(Core.Primitives.Quaternion newRot) { /* Optional: React immediately */ }
+
+
+    protected virtual void Update() // Unity's Update method
     {
-        // TODO: Implement smooth interpolation (e.g., Lerp or a dedicated movement component)
-        transform.position = newPosition.ToUnityVector();
+        if (!_isInitialized || TargetProxy == null) return;
+
+        // Smoothly interpolate towards the current state of the TargetProxy
+        transform.position = Vector3.Lerp(transform.position, TargetProxy.Position.ToUnityVector(), Time.deltaTime * PositionInterpolationSpeed);
+        transform.rotation = Quaternion.Slerp(transform.rotation, TargetProxy.Rotation.ToUnityQuaternion(), Time.deltaTime * RotationInterpolationSpeed);
     }
 
-    protected virtual void HandleRotationChanged(Core.Primitives.Quaternion newRotation)
-    {
-        // TODO: Implement smooth interpolation (e.g., Slerp or a dedicated rotation component)
-        transform.rotation = newRotation.ToUnityQuaternion();
+    protected virtual void HandleLoudDestruction() {
+        // Logger.Log($"[ClientProxyPresentation {gameObject.name}] Loud destruction signaled.");
     }
-
-    /// <summary>
-    /// Called when the proxy signals a "loud" destruction (effects should be played).
-    /// The presentation itself is not yet disposed.
-    /// </summary>
-    protected virtual void HandleLoudDestruction()
-    {
-        Logger.Log($"[ClientProxyPresentation {gameObject.name}] Loud destruction signaled. Playing effects...");
-        // Example: Instantiate explosion prefab, play sound.
-        // gameObject.GetComponent<Renderer>().enabled = false; // Hide main model
-        // You might disable colliders or other components here too.
+    protected virtual void HandleProxyVanished() { DisposePresentation(); }
+    protected virtual void DisposePresentation() {
+        if (!_isInitialized) return;
+        gameObject.SetActive(false); UnsubscribeFromProxyEvents();
+        PresentationDisposedEvent?.Invoke(this); PresentationDisposedEvent = null;
+        TargetProxy = null; _isInitialized = false;
     }
-
-    /// <summary>
-    /// Called when the target proxy's OnDestroyed event fires (meaning VanishEntity was received).
-    /// This triggers the disposal of the presentation.
-    /// </summary>
-    protected virtual void HandleProxyVanished()
-    {
-        DisposePresentation();
-    }
-
-    /// <summary>
-    /// Cleans up the presentation, unsubscribes from events, deactivates the GameObject,
-    /// and notifies listeners (e.g., an object pool manager).
-    /// </summary>
-    protected virtual void DisposePresentation()
-    {
-        if (!_isInitialized) return; // Already disposed or never initialized
-
-        Logger.Log($"[ClientProxyPresentation {gameObject.name}] Disposing.");
-        gameObject.SetActive(false);
-        UnsubscribeFromProxyEvents();
-
-        // Call before nulling TargetProxy so factory can use PrefabReference from it if needed via event.
-        PresentationDisposedEvent?.Invoke(this);
-        PresentationDisposedEvent = null; // Clear subscribers
-
-        TargetProxy = null;
-        _isInitialized = false;
-        // PrefabReference remains for the pool to identify it.
-    }
-
-    protected virtual void OnDestroy() // Unity's OnDestroy
-    {
-        // Ensure cleanup if GameObject is destroyed externally (e.g., scene change)
-        // This might lead to double invocation if DisposePresentation was already called.
-        // The _isInitialized flag helps manage this.
-        if(_isInitialized)
-        {
-            Logger.LogWarning($"[ClientProxyPresentation {gameObject.name}] Unity OnDestroy called while still initialized. Forcing DisposePresentation.");
-            DisposePresentation();
-        }
-    }
+    protected virtual void OnDestroy() { if(_isInitialized) { DisposePresentation(); } }
 }
