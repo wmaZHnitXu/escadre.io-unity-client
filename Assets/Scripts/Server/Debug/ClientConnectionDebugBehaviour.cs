@@ -1,14 +1,14 @@
 // File: Scripts/Server/Debug/ClientConnectionDebugBehaviour.cs
 using UnityEngine;
-using Core;                 // For CoreComposer
 using Core.Session;
 using Core.Model;
-using Core.Primitives;
 using Core.Visibility;
 using ServerSpecific.Debug;
 using System.Linq;
 using System.Collections.Generic;
 using Logger = Core.Logging.Logger;
+using System;
+using Random = UnityEngine.Random;
 
 
 public class ClientConnectionDebugBehaviour : MonoBehaviour
@@ -34,21 +34,21 @@ public class ClientConnectionDebugBehaviour : MonoBehaviour
     [Tooltip("Assign a Gizmo Transform. Use 'Set Escadre Course To Gizmo' action.")]
     public Transform courseTargetGizmo;
     [Tooltip("Enter Client ID of the escadre to target.")]
-    public int targetEscadreIdForAttack = -1; // Default to an invalid ID
+    public int targetEscadreIdForAttack = -1; 
     [Tooltip("Enter Entity ID of the ship to upgrade within this client's escadre.")]
-    public int shipIdForUpgrade = -1; // Default to an invalid ID
+    public int shipIdForUpgrade = -1; 
 
 
     private ClientConnection _clientConnection;
-    private Escadre _escadreInstance; // Cached for convenience
+    private Escadre _escadreInstance; 
 
-    private CoreComposer _coreComposerRef; // Reference to access Level, other ClientConnections
+    private Core.CoreComposer _coreComposerRef; 
     private VisibilityManager _visibilityManager;
     private DebugPresentationManager _entityDebugManager;
 
 
     public void Initialize(ClientConnection connection,
-                           CoreComposer coreComposer,
+                           Core.CoreComposer coreComposer, 
                            VisibilityManager visibilityManager,
                            DebugPresentationManager entityDebugManager)
     {
@@ -62,8 +62,8 @@ public class ClientConnectionDebugBehaviour : MonoBehaviour
         if (courseTargetGizmo != null)
         {
             courseTargetGizmo.gameObject.name = $"{gameObject.name}_CourseGizmo";
-            courseTargetGizmo.position = transform.position; // Initial position
-            courseTargetGizmo.gameObject.SetActive(false); // Initially hidden
+            courseTargetGizmo.position = transform.position; 
+            courseTargetGizmo.gameObject.SetActive(false); 
         }
 
         UpdateDebugInfo();
@@ -124,7 +124,6 @@ public class ClientConnectionDebugBehaviour : MonoBehaviour
         }
     }
 
-    // --- Context Menu Actions ---
 
     [ContextMenu("Escadre: Set Course to Gizmo")]
     private void DebugSetEscadreCourse()
@@ -134,14 +133,14 @@ public class ClientConnectionDebugBehaviour : MonoBehaviour
 
         if (!courseTargetGizmo.gameObject.activeSelf)
         {
-            courseTargetGizmo.position = transform.position + transform.forward * 20f; // Default offset
+            courseTargetGizmo.position = transform.position + transform.forward * 20f; 
             courseTargetGizmo.gameObject.SetActive(true);
             Logger.Log($"[ClientConnDebug {clientId_Display}] Activated course gizmo. Move it and click again.");
             return;
         }
         Core.Primitives.Vector2 dest = new Core.Primitives.Vector2(courseTargetGizmo.position.x, courseTargetGizmo.position.z);
         Logger.Log($"[ClientConnDebug {clientId_Display}] Requesting SetCourse to {dest}");
-        _clientConnection.RequestSetCourse(dest);
+        _clientConnection.RequestSetCourse(dest, Time.time); 
     }
 
     [ContextMenu("Escadre: Order Attack (using TargetEscadreIdForAttack field)")]
@@ -151,15 +150,13 @@ public class ClientConnectionDebugBehaviour : MonoBehaviour
         if (targetEscadreIdForAttack < 0) { Logger.LogWarning("Invalid TargetEscadreIdForAttack. Set it in Inspector."); return; }
         if (targetEscadreIdForAttack == _clientConnection.ClientId) { Logger.LogWarning("Cannot attack self."); return; }
 
-        // Optional: Check if targetEscadreIdForAttack actually exists
         if (!_coreComposerRef.ClientConnections.ContainsKey(targetEscadreIdForAttack))
         {
              Logger.LogWarning($"Target client ID {targetEscadreIdForAttack} does not exist.");
-             // return; // Or proceed anyway for testing server resilience
         }
 
         Logger.Log($"[ClientConnDebug {clientId_Display}] Requesting AttackEscadre on Client {targetEscadreIdForAttack}");
-        _clientConnection.RequestAttackEscadre(targetEscadreIdForAttack);
+        _clientConnection.RequestAttackEscadre(targetEscadreIdForAttack, Time.time); 
     }
 
     [ContextMenu("Escadre: Cancel All Attack Orders")]
@@ -170,21 +167,29 @@ public class ClientConnectionDebugBehaviour : MonoBehaviour
         _clientConnection.RequestCancelAttack();
     }
 
-    [ContextMenu("Escadre: Buy DefaultShip (Debug - bypasses resources)")]
+    [ContextMenu("Escadre: Buy DefaultShip (Debug - Will throw NotImplemented)")]
     private void DebugBuyDefaultShip()
     {
         if (_clientConnection == null || _escadreInstance == null) { Logger.LogWarning("No client connection or escadre."); return; }
         if (_coreComposerRef == null) { Logger.LogWarning("CoreComposer reference missing."); return; }
 
-        Logger.Log($"[ClientConnDebug {clientId_Display}] DEBUG: Buying DefaultShip (bypassing Escadre.RequestBuyShip and resources).");
+        Logger.Log($"[ClientConnDebug {clientId_Display}] DEBUG: Requesting Buy DefaultShip. This will likely throw NotImplementedException from Escadre.");
         Core.Primitives.Vector3 spawnPos = _escadreInstance.CalculateCenterPoint() +
-                                          new Core.Primitives.Vector3(Random.Range(-3f, 3f), 0, Random.Range(-3f, 3f));
-
-        DefaultShip newShip = new DefaultShip(_coreComposerRef.ServerLevel, _escadreInstance, spawnPos);
-        // The DefaultShip constructor calls _level.AddEntity(this), which queues it for processing.
-        // We must also explicitly add it to the escadre's list.
-        _escadreInstance.AddShip(newShip);
-        Logger.Log($"[ClientConnDebug {clientId_Display}] Added DefaultShip. ID will be assigned by Level. Current escadre ships: {_escadreInstance.ShipEntityIds.Count}");
+                                          new Core.Primitives.Vector3(Random.Range(-5f, 5f), 0, Random.Range(-5f, 5f));
+        
+        try
+        {
+            // ClientConnection.RequestBuyShip now takes spawnPosition.
+            _clientConnection.RequestBuyShip((int)Entity.EntityTypeEnum.DefaultShip, spawnPos, Time.time);
+        }
+        catch (NotImplementedException nie)
+        {
+            Logger.LogWarning($"[ClientConnDebug {clientId_Display}] Caught expected exception: {nie.Message}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[ClientConnDebug {clientId_Display}] Error during debug buy ship: {ex.Message}");
+        }
     }
 
     [ContextMenu("Escadre: Upgrade Ship (using ShipIdForUpgrade field)")]

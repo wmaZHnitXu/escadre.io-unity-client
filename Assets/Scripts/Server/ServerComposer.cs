@@ -3,37 +3,42 @@ using UnityEngine;
 using Core;
 using Core.Network;
 using Core.Visibility;
-// Assuming MockNetworkLayer is no longer in ServerSpecific if it's a MonoBehaviour meant for broader use
-// using ServerSpecific.Network;
-using ServerSpecific.Debug; // For DebugPresentationManagers
+using ServerSpecific.Debug; 
 using Core.Logging;
 using Core.Model;
 using Core.Primitives;
+using Core.Time; 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
 using Logger = Core.Logging.Logger;
-using Core.Network.Proxies; // For SerializationUtils
+using Core.Network.Proxies; 
 using Core.Session;
+// No specific using needed for ReadOnlyAttribute if it's in global scope or same assembly
 
 public class ServerComposer : MonoBehaviour
 {
     [Header("Core Components")]
-    private CoreComposer _coreComposer;
+    private Core.CoreComposer _coreComposer; 
 
-    [Header("Network Layer (Shared)")] // Emphasize it's shared
+    [Header("Network Layer (Shared)")] 
     [SerializeField]
     [Tooltip("Assign the MockNetworkLayer GameObject/Component from the scene here.")]
-    private MockNetworkLayer mockNetworkLayer; // Corrected field name
+    private MockNetworkLayer mockNetworkLayer; 
 
-    private IVisibilityStrategy _visibilityStrategy; // Keep this non-serialized, created in Awake
+    private IVisibilityStrategy _visibilityStrategy; 
+    private IClock _serverClock; 
 
     [Header("Entity Debug Presentation")]
     [SerializeField] private DebugPresentationManager entityDebugPresentationManager;
 
     [Header("Client Debug Presentation")]
     [SerializeField] private ClientDebugPresentationManager clientDebugPresentationManager;
+    
+    [Header("Debug Info")]
+    [SerializeField, ReadOnly] 
+    private float currentTime_Display;
 
 
     private DebugEntity lastCreatedDebugEntity;
@@ -41,109 +46,97 @@ public class ServerComposer : MonoBehaviour
         public int ClientId { get; set; }
         public Core.Primitives.Vector3 Position { get; set; }
         public float RadiusOfInterest { get; set; } = 50f;
-        // S2CHandler is no longer needed here if ClientComposer directly subscribes to MockNetworkLayer
     }
-    private List<MockClientView> _mockClientViews = new List<MockClientView>(); // Still useful for C->S simulation logic if needed
-
-    // No longer exposing ClientNetworkAccess here, ClientComposer will get it from the same shared MockNetworkLayer
-    // public IClientNetworkLayer ClientNetworkAccess => mockNetworkLayer;
+    private List<MockClientView> _mockClientViews = new List<MockClientView>(); 
 
 
     void Awake()
     {
-        Logger.Log("[ServerComposer] Awake: Initializing Server...");
+        Logger.Log("[ServerComposer MB] Awake: Initializing Server...");
+
+        #if UNITY_SERVER || UNITY_EDITOR 
+        _serverClock = new UnityClock();
+        Logger.Log("[ServerComposer MB] Using UnityClock for server time.");
+        #else
+        _serverClock = new SystemClock();
+        Logger.Log("[ServerComposer MB] Using SystemClock for server time.");
+        #endif
+
 
         if (mockNetworkLayer == null)
         {
-            Logger.LogError("[ServerComposer] MockNetworkLayer not assigned in Inspector! Server cannot function correctly with client.");
-            // Attempt to find it if not assigned, for convenience during setup
+            Logger.LogError("[ServerComposer MB] MockNetworkLayer not assigned in Inspector! Server cannot function correctly with client.");
             mockNetworkLayer = FindObjectOfType<MockNetworkLayer>();
             if (mockNetworkLayer == null)
             {
-                Logger.LogError("[ServerComposer] Could not find MockNetworkLayer in scene. Aborting server setup.");
+                Logger.LogError("[ServerComposer MB] Could not find MockNetworkLayer in scene. Aborting server setup.");
                 enabled = false;
                 return;
             }
             else
             {
-                Logger.LogWarning("[ServerComposer] MockNetworkLayer was found in scene. Please assign it in the Inspector for robustness.");
+                Logger.LogWarning("[ServerComposer MB] MockNetworkLayer was found in scene. Please assign it in the Inspector for robustness.");
             }
         }
 
         _visibilityStrategy = new DummyVisibilityStrategy();
 
         try {
-            // Pass the IServerNetworkLayer interface of the mockNetworkLayer
-            _coreComposer = new CoreComposer(mockNetworkLayer, _visibilityStrategy);
-            // SetVisibilityManager is still relevant if the mock layer uses it for BroadcastRelevant
+            _coreComposer = new Core.CoreComposer(mockNetworkLayer, _visibilityStrategy, _serverClock);
             mockNetworkLayer.SetVisibilityManager(_coreComposer.VisibilityManager);
         }
         catch (Exception ex) {
-            Logger.LogError($"[ServerComposer] CRITICAL ERROR during CoreComposer initialization: {ex.Message}\nStackTrace: {ex.StackTrace}");
+            Logger.LogError($"[ServerComposer MB] CRITICAL ERROR during CoreComposer initialization: {ex.Message}\nStackTrace: {ex.StackTrace}");
             enabled = false;
             return;
         }
 
-        // Initialize Entity Debug Presentation Manager
         if (entityDebugPresentationManager == null) entityDebugPresentationManager = GetComponent<DebugPresentationManager>();
         if (entityDebugPresentationManager != null && _coreComposer != null) {
             entityDebugPresentationManager.Initialize(_coreComposer.ServerLevel);
-            Logger.Log("[ServerComposer] Entity DebugPresentationManager initialized.");
+            Logger.Log("[ServerComposer MB] Entity DebugPresentationManager initialized.");
         } else if (entityDebugPresentationManager == null) {
-            Logger.LogWarning("[ServerComposer] Entity DebugPresentationManager not assigned/found. Entity debug visuals disabled.");
+            Logger.LogWarning("[ServerComposer MB] Entity DebugPresentationManager not assigned/found. Entity debug visuals disabled.");
         }
 
-        // Initialize Client Debug Presentation Manager
         if (clientDebugPresentationManager == null) clientDebugPresentationManager = GetComponent<ClientDebugPresentationManager>();
         if (clientDebugPresentationManager != null && _coreComposer != null && entityDebugPresentationManager != null) {
             clientDebugPresentationManager.Initialize(_coreComposer, entityDebugPresentationManager);
-            Logger.Log("[ServerComposer] ClientDebugPresentationManager initialized.");
+            Logger.Log("[ServerComposer MB] ClientDebugPresentationManager initialized.");
         } else if (clientDebugPresentationManager == null) {
-            Logger.LogWarning("[ServerComposer] ClientDebugPresentationManager not assigned/found. ClientConnection debug visuals disabled.");
+            Logger.LogWarning("[ServerComposer MB] ClientDebugPresentationManager not assigned/found. ClientConnection debug visuals disabled.");
         } else if (entityDebugPresentationManager == null && clientDebugPresentationManager != null) {
-             Logger.LogWarning("[ServerComposer] ClientDebugPresentationManager needs EntityDebugPresentationManager for full PVS visualization.");
-             clientDebugPresentationManager.Initialize(_coreComposer, null); // Can still init, but PVS lines will be limited
+             Logger.LogWarning("[ServerComposer MB] ClientDebugPresentationManager needs EntityDebugPresentationManager for full PVS visualization.");
+             clientDebugPresentationManager.Initialize(_coreComposer, null); 
         }
 
-
-        // Setup Mock Client(s) for C->S simulation
-        // The ClientComposer instance in the scene will handle S->C messages for "itself"
-        // This MockClientView is now more about tracking data for C->S simulation logic
-        // than for receiving S->C messages, as ClientComposer does that.
         var client1Data = new MockClientView { ClientId = 1, Position = Core.Primitives.Vector3.Zero, RadiusOfInterest = 150f };
-        _mockClientViews.Add(client1Data); // Store data for simulating C->S from client 1
+        _mockClientViews.Add(client1Data); 
 
-        // CoreComposer registers the client connection, which will lead to server-side state.
-        // The actual S->C message handling for this client ID 1 will be done by ClientComposer
-        // if it's configured to represent client 1.
-        _coreComposer.RegisterClient(client1Data.ClientId, client1Data.RadiusOfInterest, client1Data.Position);
+        _coreComposer.RegisterClient(client1Data.ClientId, client1Data.RadiusOfInterest, new Core.Primitives.Vector3(10,0,10));
 
-        // Server's ServerReplicationManager subscribes to mockNetworkLayer.C2S_OnMessageReceived.
-        // Client's ClientEntityManager (via ClientComposer) subscribes to mockNetworkLayer.S2C_OnMessageReceived.
-
-        // No need for _mockNetworkLayer.RegisterClientS2CHandler here anymore if ClientComposer
-        // directly subscribes to the S2C_OnMessageReceived event.
-        // The mockNetworkLayer.RegisterMockClient() can be used if the MockNetworkLayer
-        // itself needs to know about distinct client IDs for more complex broadcast filtering
-        // (if not relying solely on VisibilityManager).
-        if (mockNetworkLayer != null) // Ensure it's not null before calling
+        if (mockNetworkLayer != null) 
         {
-            mockNetworkLayer.RegisterMockClient(client1Data.ClientId); // Let mock layer know this client conceptually "exists"
+            mockNetworkLayer.RegisterMockClient(client1Data.ClientId); 
         }
 
 
-        Logger.Log("[ServerComposer] Mock client setup complete on server side.");
-        Logger.Log("[ServerComposer] Initialization complete in Awake.");
+        Logger.Log("[ServerComposer MB] Mock client setup complete on server side.");
+        Logger.Log("[ServerComposer MB] Initialization complete in Awake.");
     }
 
     void Update() {
+        if (_serverClock != null)
+        {
+            currentTime_Display = _serverClock.CurrentTime;
+        }
+
         if (_coreComposer != null && enabled) {
             _coreComposer.Update(Time.deltaTime);
         }
     }
     void OnDestroy() {
-        Logger.Log("[ServerComposer] OnDestroy: Cleaning up...");
-        // Unregister mock clients from the mock network layer itself if they were registered
+        Logger.Log("[ServerComposer MB] OnDestroy: Cleaning up...");
         if (mockNetworkLayer != null)
         {
             foreach (var viewData in _mockClientViews)
@@ -154,10 +147,10 @@ public class ServerComposer : MonoBehaviour
         _coreComposer?.Dispose();
         _coreComposer = null;
         _mockClientViews.Clear();
-        Logger.Log("[ServerComposer] Cleanup complete.");
+        _serverClock = null; 
+        Logger.Log("[ServerComposer MB] Cleanup complete.");
     }
 
-    // ContextMenu Methods - using mockNetworkLayer for C->S simulation
     [ContextMenu("1. Create Debug Entity (At Origin)")]
     public void CreateDebugEntityOrigin() { CreateDebugEntityAt(Core.Primitives.Vector3.Zero); }
 
@@ -166,11 +159,11 @@ public class ServerComposer : MonoBehaviour
 
     private void CreateDebugEntityAt(Core.Primitives.Vector3 position) {
         if (_coreComposer?.ServerLevel != null) {
-            Logger.Log($"[ServerComposer Action] Requesting DebugEntity creation at {position}...");
+            Logger.Log($"[ServerComposer MB Action] Requesting DebugEntity creation at {position}...");
             lastCreatedDebugEntity = new DebugEntity(_coreComposer.ServerLevel);
-            lastCreatedDebugEntity.Position = position;
+            lastCreatedDebugEntity.Position = position; 
         } else {
-            Logger.LogWarning("[ServerComposer Action] Cannot create entity, CoreComposer or Level not initialized!");
+            Logger.LogWarning("[ServerComposer MB Action] Cannot create entity, CoreComposer or Level not initialized!");
         }
     }
 
@@ -178,7 +171,6 @@ public class ServerComposer : MonoBehaviour
     public void SimulateClientSyncCorrect() {
         if (lastCreatedDebugEntity == null || lastCreatedDebugEntity.IsDead) { Logger.LogWarning("No active DebugEntity to sync with."); return; }
         if (mockNetworkLayer == null) { Logger.LogWarning("MockNetworkLayer not available."); return; }
-        // Simulate client 1 sending this
         var clientNetwork = (IClientNetworkLayer)mockNetworkLayer;
         int hash = HashCode.Combine(lastCreatedDebugEntity.Position.GetHashCode(), lastCreatedDebugEntity.Rotation.GetHashCode(), ((DebugEntity)lastCreatedDebugEntity).Hydration.GetHashCode(), ((DebugEntity)lastCreatedDebugEntity).Guilt.GetHashCode());
         float checksum = (float)hash;
@@ -197,19 +189,19 @@ public class ServerComposer : MonoBehaviour
     [ContextMenu("4. Kill Last Debug Entity (Loud)")]
     public void KillLastDebugEntityLoud() {
         if (lastCreatedDebugEntity != null && !lastCreatedDebugEntity.IsDead) {
-            Logger.Log($"[ServerComposer Action] Killing entity {lastCreatedDebugEntity.Id} (Loudly)");
-            lastCreatedDebugEntity.Kill(false); // Loud kill
+            Logger.Log($"[ServerComposer MB Action] Killing entity {lastCreatedDebugEntity.Id} (Loudly)");
+            lastCreatedDebugEntity.Kill(false); 
         } else {
-            Logger.LogWarning("[ServerComposer Action] No living DebugEntity tracked to kill.");
+            Logger.LogWarning("[ServerComposer MB Action] No living DebugEntity tracked to kill.");
         }
     }
     [ContextMenu("4b. Kill Last Debug Entity (Silent)")]
     public void KillLastDebugEntitySilent() {
         if (lastCreatedDebugEntity != null && !lastCreatedDebugEntity.IsDead) {
-            Logger.Log($"[ServerComposer Action] Killing entity {lastCreatedDebugEntity.Id} (Silently)");
-            lastCreatedDebugEntity.Kill(true); // Silent kill
+            Logger.Log($"[ServerComposer MB Action] Killing entity {lastCreatedDebugEntity.Id} (Silently)");
+            lastCreatedDebugEntity.Kill(true); 
         } else {
-            Logger.LogWarning("[ServerComposer Action] No living DebugEntity tracked to kill.");
+            Logger.LogWarning("[ServerComposer MB Action] No living DebugEntity tracked to kill.");
         }
     }
 
@@ -217,10 +209,9 @@ public class ServerComposer : MonoBehaviour
     [ContextMenu("5. Test Escadre Command (_SetCourse for Client 1)")]
     public void TestEscadreSetCourse() {
         if (mockNetworkLayer == null) { Logger.LogWarning("MockNetworkLayer not available."); return; }
-        // Simulate client 1 sending this command
         var clientNetwork = (IClientNetworkLayer)mockNetworkLayer;
         Core.Primitives.Vector2 newDest = new Core.Primitives.Vector2(UnityEngine.Random.Range(-50f, 50f), UnityEngine.Random.Range(-50f, 50f));
-        Logger.Log($"[ServerComposer Action] Simulating Client 1 sending _SetCourse to {newDest}");
+        Logger.Log($"[ServerComposer MB Action] Simulating Client 1 sending _SetCourse to {newDest}");
         clientNetwork.SendToServer(0, MessageType._SetCourse, writer => SerializationUtils.WriteVector2(writer, newDest));
     }
 
@@ -230,11 +221,12 @@ public class ServerComposer : MonoBehaviour
         int newClientId = _coreComposer.ClientConnections.Keys.Any() ? _coreComposer.ClientConnections.Keys.Max() + 1 : 1;
         while(_coreComposer.ClientConnections.ContainsKey(newClientId)) { newClientId++; }
 
-        var clientNewData = new MockClientView { ClientId = newClientId, Position = new Core.Primitives.Vector3(UnityEngine.Random.Range(-20f,20f),0,UnityEngine.Random.Range(-20f,20f)), RadiusOfInterest = 120f };
+        Core.Primitives.Vector3 spawnPos = new Core.Primitives.Vector3(UnityEngine.Random.Range(-20f,20f),0,UnityEngine.Random.Range(-20f,20f));
+        var clientNewData = new MockClientView { ClientId = newClientId, Position = spawnPos, RadiusOfInterest = 120f };
         _mockClientViews.Add(clientNewData);
         _coreComposer.RegisterClient(clientNewData.ClientId, clientNewData.RadiusOfInterest, clientNewData.Position);
-        if (mockNetworkLayer != null) mockNetworkLayer.RegisterMockClient(clientNewData.ClientId); // Let mock layer know
-        Logger.Log($"[ServerComposer Action] Registered new mock client (server state) with ID {newClientId}.");
+        if (mockNetworkLayer != null) mockNetworkLayer.RegisterMockClient(clientNewData.ClientId); 
+        Logger.Log($"[ServerComposer MB Action] Registered new mock client (server state) with ID {newClientId}.");
         Logger.LogWarning("NOTE: This only creates server-side state. A ClientComposer instance needs to be running to 'be' this client.");
     }
 
@@ -247,6 +239,6 @@ public class ServerComposer : MonoBehaviour
         var mockViewToRemove = _mockClientViews.FirstOrDefault(mcv => mcv.ClientId == clientIdToUnregister);
         if(mockViewToRemove != null) _mockClientViews.Remove(mockViewToRemove);
         if (mockNetworkLayer != null) mockNetworkLayer.UnregisterMockClient(clientIdToUnregister);
-        Logger.Log($"[ServerComposer Action] Unregistered mock client (server state) with ID {clientIdToUnregister}.");
+        Logger.Log($"[ServerComposer MB Action] Unregistered mock client (server state) with ID {clientIdToUnregister}.");
     }
 }
