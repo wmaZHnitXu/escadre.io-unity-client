@@ -1,48 +1,39 @@
-// File: Scripts/Server/Network/MockNetworkLayer.cs (or a shared location if client/server are separate projects later)
+// File: Scripts/Server/Network/MockNetworkLayer.cs
 using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine; // Inherits from MonoBehaviour
+using UnityEngine; 
 using Core.Network;
 using Core.Logging;
 using Core.Visibility;
-using Logger = Core.Logging.Logger; // For VisibilityManager in BroadcastRelevant
-
-// No longer ServerSpecific namespace if it's meant to be shared or a general mock
-// namespace ServerSpecific.Network
-// {
+using Logger = Core.Logging.Logger; 
 
 public class MockNetworkLayer : MonoBehaviour, IServerNetworkLayer, IClientNetworkLayer
 {
-    // Event for Server to listen to Client messages (C->S)
-    public event Action<int /*sendingClientId*/, int /*entityId (target/context)*/, MessageType, BinaryReader> C2S_OnMessageReceived;
-
-    // Event for Client to listen to Server messages (S->C)
-    // Parameters: entityId, messageType, payloadReader
-    public event Action<int, MessageType, BinaryReader> S2C_OnMessageReceived;
+    public event Action<int /*sendingNetworkSourceId*/, int /*entityId (target/context)*/, MessageType, BinaryReader> C2S_OnMessageReceived;
+    public event Action<int /*entityId*/, MessageType, BinaryReader> S2C_OnMessageReceived; // This is for THE client instance running this code.
 
     [Header("Mock Settings")]
-    [Tooltip("Default Client ID to use when SendToServer is called from a context without a specific client (e.g., test runner).")]
-    public int defaultSendingClientId = 1;
+    [Tooltip("Default Network Source ID for C->S messages if not overridden by a specific ClientComposer instance.")]
+    public int defaultSendingClientId = 1; // This is the Network Source ID
 
-
-    private VisibilityManager _visibilityManager; // Optional for BroadcastRelevant
+    private VisibilityManager _visibilityManager; 
     private MemoryStream _reusableMemoryStream = new MemoryStream(1024);
 
-    // Keep track of which "mock clients" are "connected" to receive S2C messages.
-    // This is a simple way to simulate multiple clients if needed later for BroadcastRelevant.
-    // For now, S2C_OnMessageReceived is a single event, implying one client listener.
-    // If multiple clients, S2C_OnMessageReceived would need a clientId param or separate events.
-    private HashSet<int> _mockConnectedClientIds = new HashSet<int>();
+    // Tracks which network source IDs (e.g., individual ClientComposer instances) are listening for S->C messages.
+    // Key: networkSourceId (e.g., ClientComposer's instance ID)
+    private HashSet<int> _listeningNetworkSourceIds = new HashSet<int>();
 
+    // Maps a game session's ClientId (from JWT/validation) to its current networkSourceId.
+    // Key: gameClientId (from ClientIdentity), Value: networkSourceId
+    // This allows routing S->C messages targeted at a gameClientId to the correct network pipe.
+    private Dictionary<int, int> _gameClientIdToNetworkSourceIdMap = new Dictionary<int, int>();
+    private Dictionary<int, int> _networkSourceIdToGameClientIdMap = new Dictionary<int, int>(); // Reverse lookup for cleanup
 
     void Awake()
     {
         Logger.Log("[MockNetworkLayer MB] Awake. Instance created.");
-        // Automatically "connect" the default client ID if used by a ClientComposer.
-        // This is more for conceptual clarity. A real client would explicitly connect.
-        // RegisterMockClient(defaultSendingClientId); // ClientComposer will register itself by subscribing.
     }
 
     public void SetVisibilityManager(VisibilityManager visibilityManager)
@@ -51,28 +42,69 @@ public class MockNetworkLayer : MonoBehaviour, IServerNetworkLayer, IClientNetwo
         Logger.Log($"[MockNetworkLayer MB] VisibilityManager {(visibilityManager != null ? "set" : "cleared")}.");
     }
 
-    public void RegisterMockClient(int clientId)
+    // Called by ClientComposer instances to register their network source ID for S->C message routing
+    public void RegisterMockClientS2CRouting(int networkSourceId)
     {
-        _mockConnectedClientIds.Add(clientId);
-        Logger.Log($"[MockNetworkLayer MB] Mock Client {clientId} 'connected' (registered to potentially receive broadcasts).");
+        _listeningNetworkSourceIds.Add(networkSourceId);
+        Logger.Log($"[MockNetworkLayer MB] ClientComposer instance with Network Source ID {networkSourceId} registered for S->C message routing.");
     }
-    public void UnregisterMockClient(int clientId)
+
+    public void UnregisterMockClientS2CRouting(int networkSourceId)
     {
-        _mockConnectedClientIds.Remove(clientId);
-         Logger.Log($"[MockNetworkLayer MB] Mock Client {clientId} 'disconnected'.");
+        _listeningNetworkSourceIds.Remove(networkSourceId);
+        // Also remove any mappings associated with this networkSourceId if it disconnects
+        if (_networkSourceIdToGameClientIdMap.TryGetValue(networkSourceId, out int gameClientId))
+        {
+            _gameClientIdToNetworkSourceIdMap.Remove(gameClientId);
+            _networkSourceIdToGameClientIdMap.Remove(networkSourceId);
+            Logger.Log($"[MockNetworkLayer MB] Cleaned up mappings for disconnected Network Source ID {networkSourceId} (was Game Client ID {gameClientId}).");
+        }
+        Logger.Log($"[MockNetworkLayer MB] ClientComposer instance with Network Source ID {networkSourceId} unregistered from S->C message routing.");
+    }
+
+    // Called by Core.CoreComposer after successful client validation
+    public void MapNetworkSourceToClientId(int networkSourceId, int gameClientId)
+    {
+        // If this gameClientId was previously mapped to a different networkSourceId, clean that up.
+        if (_gameClientIdToNetworkSourceIdMap.TryGetValue(gameClientId, out int oldNetworkSourceId) && oldNetworkSourceId != networkSourceId)
+        {
+            _networkSourceIdToGameClientIdMap.Remove(oldNetworkSourceId);
+            Logger.LogWarning($"[MockNetworkLayer MB] Game Client ID {gameClientId} was previously mapped to Network Source ID {oldNetworkSourceId}. Remapping to {networkSourceId}.");
+        }
+        // If this networkSourceId was previously mapped to a different gameClientId, clean that up.
+        if (_networkSourceIdToGameClientIdMap.TryGetValue(networkSourceId, out int oldGameClientId) && oldGameClientId != gameClientId)
+        {
+            _gameClientIdToNetworkSourceIdMap.Remove(oldGameClientId);
+             Logger.LogWarning($"[MockNetworkLayer MB] Network Source ID {networkSourceId} was previously mapped to Game Client ID {oldGameClientId}. Remapping to {gameClientId}.");
+        }
+
+        _gameClientIdToNetworkSourceIdMap[gameClientId] = networkSourceId;
+        _networkSourceIdToGameClientIdMap[networkSourceId] = gameClientId;
+        Logger.Log($"[MockNetworkLayer MB] Mapped Network Source ID {networkSourceId} to Game Client ID {gameClientId}.");
+    }
+    
+    public void RemoveNetworkSourceMappingForClientId(int gameClientId)
+    {
+        if (_gameClientIdToNetworkSourceIdMap.TryGetValue(gameClientId, out int networkSourceId))
+        {
+            _gameClientIdToNetworkSourceIdMap.Remove(gameClientId);
+            _networkSourceIdToGameClientIdMap.Remove(networkSourceId);
+            Logger.Log($"[MockNetworkLayer MB] Removed mapping for Game Client ID {gameClientId} (was Network Source ID {networkSourceId}).");
+        }
     }
 
 
-    // --- IClientNetworkLayer Implementation (Client calls these) ---
+    // --- IClientNetworkLayer Implementation ---
     event Action<int, MessageType, BinaryReader> IClientNetworkLayer.OnMessageReceived
     {
-        add { S2C_OnMessageReceived += value; Logger.Log("[MockNetworkLayer MB] Client subscribed to S2C_OnMessageReceived."); }
-        remove { S2C_OnMessageReceived -= value; Logger.Log("[MockNetworkLayer MB] Client unsubscribed from S2C_OnMessageReceived."); }
+        add { S2C_OnMessageReceived += value; Logger.Log($"[MockNetworkLayer MB] Client subscribed to S2C_OnMessageReceived (Network Source ID: {this.defaultSendingClientId})."); }
+        remove { S2C_OnMessageReceived -= value; Logger.Log($"[MockNetworkLayer MB] Client unsubscribed from S2C_OnMessageReceived (Network Source ID: {this.defaultSendingClientId})."); }
     }
 
-    void IClientNetworkLayer.SendToServer(int entityId, MessageType messageType, Action<BinaryWriter> serializePayloadAction)
+    void IClientNetworkLayer.SendToServer(int entityIdContext, MessageType messageType, Action<BinaryWriter> serializePayloadAction)
     {
-        // Logger.Log($"[MockNetworkLayer MB C->S SEND] From Client {defaultSendingClientId}, EntityCtx: {entityId}, Type: {messageType}");
+        // 'this.defaultSendingClientId' here is the networkSourceId of the ClientComposer calling this.
+        Logger.Log($"[MockNetworkLayer MB C->S SEND] From NetworkSourceID {this.defaultSendingClientId}, EntityCtx: {entityIdContext}, Type: {messageType}");
         _reusableMemoryStream.Position = 0; _reusableMemoryStream.SetLength(0);
         using (var writer = new BinaryWriter(_reusableMemoryStream, System.Text.Encoding.UTF8, true))
         {
@@ -84,22 +116,58 @@ public class MockNetworkLayer : MonoBehaviour, IServerNetworkLayer, IClientNetwo
         {
             try
             {
-                C2S_OnMessageReceived?.Invoke(defaultSendingClientId, entityId, messageType, reader);
+                C2S_OnMessageReceived?.Invoke(this.defaultSendingClientId, entityIdContext, messageType, reader);
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[MockNetworkLayer MB] Error invoking C2S_OnMessageReceived: {ex.Message}\nPayload Type: {messageType}, Entity: {entityId}\n{ex.StackTrace}");
+                Logger.LogError($"[MockNetworkLayer MB] Error invoking C2S_OnMessageReceived: {ex.Message}\nPayload Type: {messageType}, Entity: {entityIdContext}\n{ex.StackTrace}");
             }
         }
     }
 
 
-    // --- IServerNetworkLayer Implementation (Server calls these) ---
+    // --- IServerNetworkLayer Implementation ---
     event Action<int, int, MessageType, BinaryReader> IServerNetworkLayer.OnClientMessageReceived
     {
         add { C2S_OnMessageReceived += value; Logger.Log("[MockNetworkLayer MB] Server subscribed to C2S_OnMessageReceived."); }
         remove { C2S_OnMessageReceived -= value; Logger.Log("[MockNetworkLayer MB] Server unsubscribed from C2S_OnMessageReceived.");}
     }
+
+    private void DispatchS2CMessage(int targetNetworkSourceId, int entityId, MessageType messageType, MemoryStream memoryStream)
+    {
+        // This mock assumes only one S2C_OnMessageReceived handler (THE client instance).
+        // If targetNetworkSourceId matches the defaultSendingClientId of *this* MockNetworkLayer instance
+        // (which is set by the ClientComposer running the client logic), then invoke.
+        // This simulates sending to a specific client "connection".
+        if (_listeningNetworkSourceIds.Contains(targetNetworkSourceId))
+        {
+            // Check if this specific MockNetworkLayer instance is the one associated with targetNetworkSourceId
+            // In a real setup, this would be a direct send over a socket/connection.
+            // Here, we rely on ClientComposer setting its defaultSendingClientId on the MockNetworkLayer it uses.
+            // And S2C_OnMessageReceived is subscribed by that ClientComposer's EntityManager.
+            // This check is a bit indirect for a mock. A better mock might have a dictionary of S2C_OnMessageReceived handlers keyed by networkSourceId.
+            // For now, if the source ID is listening, we assume the S2C_OnMessageReceived is for it.
+            
+            memoryStream.Position = 0;
+            using (var reader = new BinaryReader(memoryStream, System.Text.Encoding.UTF8, true))
+            {
+                try
+                {
+                    // Logger.Log($"[MockNetworkLayer MB] Invoking S2C_OnMessageReceived for Entity {entityId}, Type {messageType} (intended for NetworkSourceID {targetNetworkSourceId})");
+                    S2C_OnMessageReceived?.Invoke(entityId, messageType, reader);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[MockNetworkLayer MB] Error invoking S2C_OnMessageReceived (DispatchS2CMessage to {targetNetworkSourceId}): {ex.Message}\nPayload Type: {messageType}, Entity: {entityId}\n{ex.StackTrace}");
+                }
+            }
+        }
+        else
+        {
+            // Logger.LogWarning($"[MockNetworkLayer MB S->C] No listening client for NetworkSourceID {targetNetworkSourceId}. Message for Entity {entityId}, Type {messageType} dropped.");
+        }
+    }
+
 
     void IServerNetworkLayer.BroadcastRelevant(int entityId, MessageType messageType, Action<BinaryWriter> serializePayloadAction)
     {
@@ -109,83 +177,61 @@ public class MockNetworkLayer : MonoBehaviour, IServerNetworkLayer, IClientNetwo
             serializePayloadAction(writer);
         }
 
-        IEnumerable<int> targetClientIds;
+        IEnumerable<int> targetGameClientIds;
         if (_visibilityManager != null)
         {
-            targetClientIds = _visibilityManager.GetClientsSeeingEntity(entityId).ToList();
-            if (!targetClientIds.Any() && messageType != MessageType.DestroyEntity && messageType != MessageType.VanishEntity) // Allow vital lifecycle messages
+            targetGameClientIds = _visibilityManager.GetClientsSeeingEntity(entityId).ToList();
+            if (!targetGameClientIds.Any() && messageType != MessageType.DestroyEntity && messageType != MessageType.VanishEntity) 
             {
-                // Logger.Log($"[MockNetworkLayer MB S->C BROADCAST] Entity {entityId} Type {messageType} - no relevant clients.");
                 return;
             }
-            // Logger.Log($"[MockNetworkLayer MB S->C BROADCAST-RELEVANT] Entity: {entityId}, Type: {messageType}. Targets based on VM: [{string.Join(",", targetClientIds)}]");
         }
         else
         {
-            // If no VM, broadcast to all "connected" mock clients.
-            targetClientIds = new List<int>(_mockConnectedClientIds);
-            // Logger.LogWarning($"[MockNetworkLayer MB S->C BROADCAST-ALL (VM not set)] Entity: {entityId}, Type: {messageType}. Targets: All registered mock clients.");
+            // If no VM, broadcast to all *mapped* game clients.
+            targetGameClientIds = new List<int>(_gameClientIdToNetworkSourceIdMap.Keys);
+            Logger.LogWarning($"[MockNetworkLayer MB S->C BROADCAST-ALL (VM not set or no relevant clients from VM)] Entity: {entityId}, Type: {messageType}. Targets: All mapped game clients.");
         }
 
-        foreach (int clientId in targetClientIds) // For each client who should receive it
+        foreach (int gameClientId in targetGameClientIds) 
         {
-            // For this simple mock, we assume S2C_OnMessageReceived is for THE client.
-            // If we had per-client handlers on the S2C side, we'd route here.
-            // For now, just invoke the single S2C_OnMessageReceived.
-            // The 'clientId' in targetClientIds is effectively ignored by THIS mock's S2C_OnMessageReceived invocation.
-            // A more complex mock would use it.
-            _reusableMemoryStream.Position = 0;
-            using (var reader = new BinaryReader(_reusableMemoryStream, System.Text.Encoding.UTF8, true))
+            if (_gameClientIdToNetworkSourceIdMap.TryGetValue(gameClientId, out int targetNetworkSourceId))
             {
-                try
-                {
-                    // Logger.Log($"[MockNetworkLayer MB] Invoking S2C_OnMessageReceived for Entity {entityId}, Type {messageType} (intended for client {clientId})");
-                    S2C_OnMessageReceived?.Invoke(entityId, messageType, reader);
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"[MockNetworkLayer MB] Error invoking S2C_OnMessageReceived (Broadcast): {ex.Message}\nPayload Type: {messageType}, Entity: {entityId}\n{ex.StackTrace}");
-                }
+                DispatchS2CMessage(targetNetworkSourceId, entityId, messageType, _reusableMemoryStream);
+            }
+            else
+            {
+                Logger.LogWarning($"[MockNetworkLayer MB S->C BROADCAST] No network source mapping for Game Client ID {gameClientId}. Cannot send message for Entity {entityId}, Type {messageType}.");
             }
         }
     }
 
-    void IServerNetworkLayer.SendToClient(int clientId, int entityId, MessageType messageType, Action<BinaryWriter> serializePayloadAction)
+    void IServerNetworkLayer.SendToClient(int gameClientId, int entityId, MessageType messageType, Action<BinaryWriter> serializePayloadAction)
     {
-        // Logger.Log($"[MockNetworkLayer MB S->C UNICAST] To ClientId={clientId}, Entity: {entityId}, Type: {messageType}");
-        _reusableMemoryStream.Position = 0; _reusableMemoryStream.SetLength(0);
-        using (var writer = new BinaryWriter(_reusableMemoryStream, System.Text.Encoding.UTF8, true))
+        if (_gameClientIdToNetworkSourceIdMap.TryGetValue(gameClientId, out int targetNetworkSourceId))
         {
-            serializePayloadAction(writer);
+            // Logger.Log($"[MockNetworkLayer MB S->C UNICAST] To GameClientID={gameClientId} (NetworkSourceID={targetNetworkSourceId}), Entity: {entityId}, Type: {messageType}");
+            _reusableMemoryStream.Position = 0; _reusableMemoryStream.SetLength(0);
+            using (var writer = new BinaryWriter(_reusableMemoryStream, System.Text.Encoding.UTF8, true))
+            {
+                serializePayloadAction(writer);
+            }
+            DispatchS2CMessage(targetNetworkSourceId, entityId, messageType, _reusableMemoryStream);
         }
-        _reusableMemoryStream.Position = 0;
-
-        using (var reader = new BinaryReader(_reusableMemoryStream, System.Text.Encoding.UTF8, true))
+        else
         {
-            try
-            {
-                // The 'clientId' here is who the server INTENDS to send to.
-                // Our S2C_OnMessageReceived event doesn't take clientId, so it's implicitly for "the" client.
-                S2C_OnMessageReceived?.Invoke(entityId, messageType, reader);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[MockNetworkLayer MB] Error invoking S2C_OnMessageReceived (Unicast to {clientId}): {ex.Message}\nPayload Type: {messageType}, Entity: {entityId}\n{ex.StackTrace}");
-            }
+            Logger.LogWarning($"[MockNetworkLayer MB S->C UNICAST] No network source mapping for Game Client ID {gameClientId}. Cannot send message for Entity {entityId}, Type {messageType}.");
         }
     }
 
-    void IServerNetworkLayer.SendVanishCommand(int entityId, IEnumerable<int> targetClientIds)
+    void IServerNetworkLayer.SendVanishCommand(int entityId, IEnumerable<int> targetGameClientIds)
     {
-        if (targetClientIds == null || !targetClientIds.Any()) return;
-        // Logger.Log($"[MockNetworkLayer MB S->C VANISH] Entity: {entityId} to Clients: [{string.Join(",", targetClientIds)}]");
+        if (targetGameClientIds == null || !targetGameClientIds.Any()) return;
         Action<BinaryWriter> emptyPayloadAction = writer => { };
-        var serverLayer = (IServerNetworkLayer)this; // Explicit interface call
-        foreach (int clientId in targetClientIds)
+        var serverLayer = (IServerNetworkLayer)this; 
+        foreach (int gameClientId in targetGameClientIds)
         {
-            serverLayer.SendToClient(clientId, entityId, MessageType.VanishEntity, emptyPayloadAction);
+            serverLayer.SendToClient(gameClientId, entityId, MessageType.VanishEntity, emptyPayloadAction);
         }
     }
 }
-
-// } // End of potential namespace
