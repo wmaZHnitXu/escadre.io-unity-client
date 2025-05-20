@@ -1,11 +1,9 @@
 // File: Scripts/Server/Debug/ModelEntityDebugBehaviour.cs
 using UnityEngine;
 using Core.Model;          
-using Core.Primitives;     
 using Core.Logging;
 using Logger = Core.Logging.Logger;
 using System;        
-// No specific using needed for ReadOnlyAttribute if it's in global scope or same assembly
 
 [DefaultExecutionOrder(100)] 
 public class ModelEntityDebugBehaviour : MonoBehaviour
@@ -20,8 +18,8 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
     [Header("Debug Controls")]
     [Tooltip("If true, this GameObject's transform follows the Core Entity's state.")]
     public bool followEntity = true;
-    [Tooltip("Transform to use as the target for teleportation.")]
-    public Transform teleportTargetGizmo;
+    [Tooltip("Transform to use as the target for actions like Teleport or SetMovementTarget (for ships).")]
+    public Transform actionTargetGizmo; // Renamed from teleportTargetGizmo
 
 
     protected Entity _targetEntity; 
@@ -35,14 +33,12 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
 
         UpdateDebugInfo(); 
 
-        if (teleportTargetGizmo != null)
+        if (actionTargetGizmo != null)
         {
-            teleportTargetGizmo.gameObject.name = $"{gameObject.name}_TeleportGizmo";
-            teleportTargetGizmo.position = transform.position + UnityEngine.Vector3.up * 2f; 
-            teleportTargetGizmo.gameObject.SetActive(false); 
+            actionTargetGizmo.gameObject.name = $"{gameObject.name}_ActionTargetGizmo";
+            actionTargetGizmo.position = transform.position + Vector3.up * 2f + transform.forward * 2f; 
+            actionTargetGizmo.gameObject.SetActive(false); 
         }
-
-
         Logger.Log($"[ModelEntityDebugBehaviour:{entityId}] Initialized for {gameObject.name}.");
     }
 
@@ -73,28 +69,8 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
             if (isDead) r.material.color = new Color(r.material.color.r * 0.5f, r.material.color.g * 0.5f, r.material.color.b * 0.5f);
         }
     }
-
-
-    [ContextMenu("Set Entity Position to This Transform (No Teleport Event)")]
-    protected virtual void SetEntityPositionFromTransform()
-    {
-        if (_targetEntity == null || _targetEntity.IsDead)
-        {
-            Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Cannot set position, entity is null or dead.");
-            return;
-        }
-        if (followEntity)
-        {
-            Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Cannot set position while 'Follow Entity' is enabled.");
-            return;
-        }
-
-        Core.Primitives.Vector3 newCorePos = transform.position.ToCoreVector();
-        Logger.Log($"[ModelEntityDebugBehaviour:{entityId}] Setting Core Entity position to {newCorePos} (direct, no event).");
-        _targetEntity.Position = newCorePos; 
-    }
     
-    [ContextMenu("Teleport Entity to TeleportGizmo Position")]
+    [ContextMenu("Teleport Entity to ActionTargetGizmo Position")]
     protected virtual void TeleportEntityToGizmo()
     {
         if (_targetEntity == null || _targetEntity.IsDead)
@@ -102,45 +78,24 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
             Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Cannot teleport, entity is null or dead.");
             return;
         }
-        if (teleportTargetGizmo == null)
+        if (actionTargetGizmo == null)
         {
-            Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Teleport Target Gizmo not assigned.");
+            Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Action Target Gizmo not assigned.");
             return;
         }
-        if (!teleportTargetGizmo.gameObject.activeSelf)
+        if (!actionTargetGizmo.gameObject.activeSelf)
         {
-            teleportTargetGizmo.position = transform.position + transform.forward * 5f + UnityEngine.Vector3.up * 1f;
-            teleportTargetGizmo.gameObject.SetActive(true);
-            Logger.Log($"[ModelEntityDebugBehaviour:{entityId}] Activated teleport gizmo. Move it and click again.");
+            actionTargetGizmo.position = transform.position + transform.forward * 5f + Vector3.up * 1f;
+            actionTargetGizmo.gameObject.SetActive(true);
+            Logger.Log($"[ModelEntityDebugBehaviour:{entityId}] Activated action target gizmo. Move it and click Teleport again.");
             return;
         }
 
-        Core.Primitives.Vector3 newCorePos = teleportTargetGizmo.position.ToCoreVector();
-        Core.Primitives.Quaternion newCoreRot = teleportTargetGizmo.rotation.ToCoreQuaternion();
+        Core.Primitives.Vector3 newCorePos = actionTargetGizmo.position.ToCoreVector();
+        Core.Primitives.Quaternion newCoreRot = actionTargetGizmo.rotation.ToCoreQuaternion();
         Logger.Log($"[ModelEntityDebugBehaviour:{entityId}] Teleporting Core Entity to Pos: {newCorePos}, Rot: {newCoreRot}");
         _targetEntity.TeleportTo(newCorePos, newCoreRot);
     }
-
-
-    [ContextMenu("Set Entity Rotation to This Transform (No Teleport Event)")]
-    protected virtual void SetEntityRotationFromTransform()
-    {
-         if (_targetEntity == null || _targetEntity.IsDead)
-        {
-            Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Cannot set rotation, entity is null or dead.");
-            return;
-        }
-        if (followEntity)
-        {
-             Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Cannot set rotation while 'Follow Entity' is enabled.");
-            return;
-        }
-        Core.Primitives.Quaternion newCoreRot = transform.rotation.ToCoreQuaternion();
-        Logger.Log($"[ModelEntityDebugBehaviour:{entityId}] Setting Core Entity rotation to {newCoreRot} (direct, no event).");
-        _targetEntity.TeleportTo(_targetEntity.Position, newCoreRot); 
-        Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Used Teleport to set rotation as direct setter is protected.");
-    }
-
 
     [ContextMenu("Kill Entity (Normal)")]
     protected virtual void KillEntityNormal()
@@ -170,15 +125,15 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
     
     protected virtual void OnDrawGizmos() 
     {
-        if (_targetEntity != null && !_targetEntity.IsDead && teleportTargetGizmo != null && teleportTargetGizmo.gameObject.activeSelf)
+        // Draw actionTargetGizmo line if it's active and entity is not dead
+        if (_targetEntity != null && !_targetEntity.IsDead && actionTargetGizmo != null && actionTargetGizmo.gameObject.activeSelf)
         {
-            Gizmos.color = Color.blue;
-            Gizmos.DrawLine(transform.position, teleportTargetGizmo.position);
-            Gizmos.DrawWireSphere(teleportTargetGizmo.position, 0.6f);
-            Gizmos.DrawLine(teleportTargetGizmo.position, teleportTargetGizmo.position + teleportTargetGizmo.forward * 1.5f);
+            Gizmos.color = Color.yellow; // Changed color for general action target
+            Gizmos.DrawLine(transform.position, actionTargetGizmo.position);
+            Gizmos.DrawWireSphere(actionTargetGizmo.position, 0.6f);
+            Gizmos.DrawLine(actionTargetGizmo.position, actionTargetGizmo.position + actionTargetGizmo.forward * 1.5f); // Show orientation
         }
     }
-
 
     protected virtual void OnDestroy()
     {
