@@ -70,11 +70,23 @@ public class AnonymousLoginUI : UIScreen // Наследуемся от UIScreen
     // Переопределяем OnShow, если нужно что-то делать при показе этого экрана
     protected override void OnShow()
     {
-        base.OnShow(); // Хорошая практика - вызывать метод базового класса
+        base.OnShow();
         Debug.Log("Anonymous Login Screen Shown. Ready for input.");
-        // Например, можно обновить список серверов, если он мог измениться
-        // FetchAndDisplayServerList();
-        // Или установить фокус на поле ввода ника
+        // Установить значение "Без аккаунта" в выпадающем списке
+        if (loginMethodDropdown != null)
+        {
+            // Найти индекс опции "Без аккаунта"
+            for (int i = 0; i < loginMethodDropdown.options.Count; i++)
+            {
+                if (loginMethodDropdown.options[i].text == "Без аккаунта")
+                {
+                    // Используем SetValueWithoutNotify, чтобы не вызвать OnLoginMethodChanged снова и не уйти в цикл
+                    loginMethodDropdown.SetValueWithoutNotify(i);
+                    break;
+                }
+            }
+        }
+        // FetchAndDisplayServerList(); // Если нужно обновлять при каждом показе
         // nicknameInputField.Select();
         // nicknameInputField.ActivateInputField();
     }
@@ -167,12 +179,18 @@ public class AnonymousLoginUI : UIScreen // Наследуемся от UIScreen
 
     private void OnLoginMethodChanged(int index)
     {
+        // Убедимся, что ссылка на UIManager есть
+        if (uiManager == null) uiManager = FindObjectOfType<UIManager>();
+
         string selectedMethod = loginMethodDropdown.options[index].text;
-        Debug.Log($"Login method changed to: {selectedMethod}");
+        Debug.Log($"AnonymousLoginUI: Login method changed to: {selectedMethod}");
+
         if (selectedMethod == "С аккаунтом")
         {
+            // Переключаемся на экран входа с аккаунтом
             uiManager.SwitchToScreen(UIScreenType.RegisteredLogin);
         }
+        // Если выбран "Без аккаунта", ничего дополнительно делать не нужно, т.к. мы уже на этом экране
     }
 
     private void PopulateServerDropdownWithDummyData()

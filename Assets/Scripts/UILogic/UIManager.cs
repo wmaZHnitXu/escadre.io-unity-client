@@ -8,7 +8,7 @@ public class UIManager : MonoBehaviour
 {
     [Header("Screen References")]
     [SerializeField] private AnonymousLoginUI anonymousLoginScreen; // Меняем тип
-    // [SerializeField] private RegisteredLoginScreen registeredLoginScreen; // Тоже будет UIScreen
+    [SerializeField] private RegisteredLoginUI registeredLoginScreen; // Тоже будет UIScreen
     [SerializeField] private GameUI gameUI; // И это
 
     private UIScreen currentVisibleScreen; // Используем UIScreen
@@ -49,8 +49,9 @@ public class UIManager : MonoBehaviour
         // Пройдемся по всем экранам, которые у вас есть, и скроем их
         // Это нужно будет расширять по мере добавления экранов
         if (anonymousLoginScreen != null) anonymousLoginScreen.Hide(true);
+        if (registeredLoginScreen != null) registeredLoginScreen.Hide(true);
         // if (registeredLoginScreen != null) registeredLoginScreen.Hide(true);
-        // if (mainMenuScreen != null) mainMenuScreen.Hide(true);
+        if (gameUI != null) gameUI.Hide(true);
     }
 
     public void SwitchToScreen(UIScreenType screenType, bool hideInstantly = false, Action onSwitched = null)
@@ -95,7 +96,7 @@ public class UIManager : MonoBehaviour
         switch (screenType)
         {
             case UIScreenType.AnonymousLogin: return anonymousLoginScreen;
-            // case UIScreenType.RegisteredLogin: return registeredLoginScreen;
+            case UIScreenType.RegisteredLogin: return registeredLoginScreen;
             case UIScreenType.GameUI: return gameUI;
             default:
                 Debug.LogError($"No screen configured for UIScreenType: {screenType}");
