@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using TMPro; // Если будете использовать TextMeshPro элементы
 using Assets.Scripts.UILogic;
 using System.Collections.Generic;
+using Assets.Scripts.UILogic;
 
 public class RegisteredLoginUI : UIScreen // Наследуемся от UIScreen
 {
@@ -77,28 +78,59 @@ public class RegisteredLoginUI : UIScreen // Наследуемся от UIScree
         // passwordInputField.text = "";
     }
 
-    private void OnLoginButtonClicked()
+    private async void OnLoginButtonClicked() // Делаем асинхронным для заглушки
     {
         string email = emailInputField.text;
         string password = passwordInputField.text;
+
+        // TODO: Валидация
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        {
+            Debug.LogError("Email and Password cannot be empty.");
+            // TODO: Показать ошибку пользователю
+            return;
+        }
+
         Debug.Log($"Login attempt: Email='{email}', Password='{password}'");
 
         // TODO: Вызвать masterServerService.LoginAsync(email, password);
-        // И обработать результат (успех/ошибка, переход на другой экран)
+        // Заглушка:
+        SetInteractable(false); // Блокируем UI
+        await System.Threading.Tasks.Task.Delay(1000); // Имитация запроса
+
+        // Имитируем успешный логин (например, если email не "error@example.com")
+        bool mockLoginSuccess = (email != "error@example.com");
+
+        if (mockLoginSuccess)
+        {
+            Debug.Log("Login successful (mock). Switching to User Profile.");
+            // TODO: Сохранить токены ответа сервера, имя пользователя и т.д. в SessionManager
+            // sessionManager.SetUserSession(response.AccessToken, response.RefreshToken, response.User.Nickname);
+            PlayerPrefs.SetString("UserAccessToken", "mock_access_token_for_" + email); // Простая заглушка
+            PlayerPrefs.SetString("LastLoggedInNickname", email.Split('@')[0]); // Имя из email для примера
+            PlayerPrefs.Save();
+
+            uiManager.SwitchToScreen(UIScreenType.UserProfileUI);
+        }
+        else
+        {
+            Debug.LogError("Login failed (mock). Invalid credentials or server error.");
+            // TODO: Показать ошибку пользователю
+            SetInteractable(true); // Разблокируем UI если ошибка
+        }
+        // SetInteractable(true); // Если не было перехода, то разблокировать
     }
 
     private void OnRegisterButtonClicked()
     {
-        Debug.Log("Register button clicked. Should switch to Registration Screen or show registration fields.");
-        // TODO: Переключиться на экран регистрации или показать поля для регистрации
-        // uiManager.SwitchToScreen(UIScreenType.Registration);
+        Debug.Log("Register button clicked. Switching to Registration Screen.");
+        uiManager.SwitchToScreen(UIScreenType.Registration);
     }
 
     private void OnForgotPasswordClicked()
     {
-        Debug.Log("Forgot Password button clicked. Should switch to Forgot Password Screen.");
-        // TODO: Переключиться на экран восстановления пароля
-        // uiManager.SwitchToScreen(UIScreenType.ForgotPassword);
+        Debug.Log("Forgot Password button clicked. Switching to Password Restoration Screen.");
+        uiManager.SwitchToScreen(UIScreenType.PasswordRestoration);
     }
 
     // Обработка изменения метода входа на этом экране
@@ -114,6 +146,18 @@ public class RegisteredLoginUI : UIScreen // Наследуемся от UIScree
             uiManager.SwitchToScreen(UIScreenType.AnonymousLogin);
         }
         // Если "С аккаунтом", то остаемся на этом экране
+    }
+
+    private void SetInteractable(bool state)
+    {
+        emailInputField.interactable = state;
+        passwordInputField.interactable = state;
+        loginButton.interactable = state;
+        registerButton.interactable = state;
+        forgotPasswordButton.interactable = state;
+        loginMethodDropdown.interactable = state;
+        serverDropdown.interactable = state;
+         if(canvasGroup != null) canvasGroup.interactable = state;
     }
 
     private void InitializeLoginMethodDropdown()
