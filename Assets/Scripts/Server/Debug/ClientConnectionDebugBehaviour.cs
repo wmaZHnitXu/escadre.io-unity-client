@@ -180,7 +180,7 @@ public class ClientConnectionDebugBehaviour : MonoBehaviour
         try
         {
             // ClientConnection.RequestBuyShip now takes spawnPosition.
-            _clientConnection.RequestBuyShip((int)Entity.EntityTypeEnum.DefaultShip, spawnPos, Time.time);
+            //_clientConnection.RequestBuyShip((int)Entity.EntityTypeEnum.DefaultShip, spawnPos, Time.time);
         }
         catch (NotImplementedException nie)
         {

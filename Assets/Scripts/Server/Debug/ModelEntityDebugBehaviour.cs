@@ -19,8 +19,6 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
     [Tooltip("If true, this GameObject's transform follows the Core Entity's state.")]
     public bool followEntity = true;
     [Tooltip("Transform to use as the target for actions like Teleport or SetMovementTarget (for ships).")]
-    public Transform actionTargetGizmo; // Renamed from teleportTargetGizmo
-
 
     protected Entity _targetEntity; 
 
@@ -33,12 +31,6 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
 
         UpdateDebugInfo(); 
 
-        if (actionTargetGizmo != null)
-        {
-            actionTargetGizmo.gameObject.name = $"{gameObject.name}_ActionTargetGizmo";
-            actionTargetGizmo.position = transform.position + Vector3.up * 2f + transform.forward * 2f; 
-            actionTargetGizmo.gameObject.SetActive(false); 
-        }
         Logger.Log($"[ModelEntityDebugBehaviour:{entityId}] Initialized for {gameObject.name}.");
     }
 
@@ -70,7 +62,7 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
         }
     }
     
-    [ContextMenu("Teleport Entity to ActionTargetGizmo Position")]
+    [ContextMenu("Teleport Entity")]
     protected virtual void TeleportEntityToGizmo()
     {
         if (_targetEntity == null || _targetEntity.IsDead)
@@ -78,21 +70,9 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
             Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Cannot teleport, entity is null or dead.");
             return;
         }
-        if (actionTargetGizmo == null)
-        {
-            Logger.LogWarning($"[ModelEntityDebugBehaviour:{entityId}] Action Target Gizmo not assigned.");
-            return;
-        }
-        if (!actionTargetGizmo.gameObject.activeSelf)
-        {
-            actionTargetGizmo.position = transform.position + transform.forward * 5f + Vector3.up * 1f;
-            actionTargetGizmo.gameObject.SetActive(true);
-            Logger.Log($"[ModelEntityDebugBehaviour:{entityId}] Activated action target gizmo. Move it and click Teleport again.");
-            return;
-        }
 
-        Core.Primitives.Vector3 newCorePos = actionTargetGizmo.position.ToCoreVector();
-        Core.Primitives.Quaternion newCoreRot = actionTargetGizmo.rotation.ToCoreQuaternion();
+        Core.Primitives.Vector3 newCorePos = transform.position.ToCoreVector();
+        Core.Primitives.Quaternion newCoreRot = transform.rotation.ToCoreQuaternion();
         Logger.Log($"[ModelEntityDebugBehaviour:{entityId}] Teleporting Core Entity to Pos: {newCorePos}, Rot: {newCoreRot}");
         _targetEntity.TeleportTo(newCorePos, newCoreRot);
     }
@@ -126,12 +106,11 @@ public class ModelEntityDebugBehaviour : MonoBehaviour
     protected virtual void OnDrawGizmos() 
     {
         // Draw actionTargetGizmo line if it's active and entity is not dead
-        if (_targetEntity != null && !_targetEntity.IsDead && actionTargetGizmo != null && actionTargetGizmo.gameObject.activeSelf)
+        if (_targetEntity != null && !_targetEntity.IsDead)
         {
             Gizmos.color = Color.yellow; // Changed color for general action target
-            Gizmos.DrawLine(transform.position, actionTargetGizmo.position);
-            Gizmos.DrawWireSphere(actionTargetGizmo.position, 0.6f);
-            Gizmos.DrawLine(actionTargetGizmo.position, actionTargetGizmo.position + actionTargetGizmo.forward * 1.5f); // Show orientation
+            Gizmos.DrawLine(_targetEntity.Position.ToUnityVector(), transform.position);
+            Gizmos.DrawLine(transform.position, transform.position + transform.forward * 1.5f); // Show orientation
         }
     }
 

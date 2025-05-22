@@ -13,17 +13,20 @@ namespace Core.Logging // Must match the namespace of the partial definition
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD // Optional: Log only in editor/dev builds
             Debug.Log(message);
+            UnityLoggerDumper.Instance?.Add("LOG " + message);
 #endif
         }
 
         public static partial void LogWarning(string message)
         {
-             Debug.LogWarning(message);
+            Debug.LogWarning(message);
+            UnityLoggerDumper.Instance?.Add("WARN " + message);
         }
 
         public static partial void LogError(string message)
         {
-             Debug.LogError(message);
+            Debug.LogError(message);
+             UnityLoggerDumper.Instance?.Add("ERR " + message);
         }
     }
 }

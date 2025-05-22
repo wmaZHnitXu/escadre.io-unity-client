@@ -7,6 +7,12 @@ using Core.Time;
 using Logger = Core.Logging.Logger;
 using System.IO;
 using System.Linq;
+using System.Collections.Generic; // For List, Tuple
+using Core.Primitives; // For Vector2
+using System;
+using Vector2 = Core.Primitives.Vector2;
+using Core.Model;
+using Core.Network.Proxies; // For Tuple
 
 public class ClientComposer : MonoBehaviour
 {
@@ -38,13 +44,15 @@ public class ClientComposer : MonoBehaviour
     [SerializeField, ReadOnly]
     private bool isConnectionAttempted = false;
     [SerializeField, ReadOnly]
-    private bool isSessionActive = false; // True after successful application-level handshake
+    private bool isSessionFullyActive = false; // Renamed for clarity
 
 
     private ClientLevel _clientLevel;
     private ClientEntityManager _entityManager;
-    private IClientNetworkLayer _clientNetworkAccess;
+    private IClientNetworkLayer _clientNetworkAccess; 
     private IClock _clientClock; 
+    private ClientGameActions _gameActions; 
+    public ClientEscadreState LocalEscadreState { get; private set; } 
 
     void Awake()
     {
@@ -66,11 +74,21 @@ public class ClientComposer : MonoBehaviour
             Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer found in scene. Assign in Inspector for robustness.");
         }
         _clientNetworkAccess = mockNetworkLayer;
-        mockNetworkLayer.defaultSendingClientId = thisClientInstanceId; // Inform mock layer of this instance's network source ID
+        mockNetworkLayer.defaultSendingClientId = thisClientInstanceId; 
 
 
         _clientLevel = new ClientLevel(_clientClock); 
         _entityManager = new ClientEntityManager(_clientNetworkAccess, _clientLevel, _clientClock);
+        _gameActions = new ClientGameActions(_clientNetworkAccess, thisClientInstanceId);
+
+        var localEscadreProxy = _entityManager.GetOrCreateEscadreProxy(thisClientInstanceId);
+        LocalEscadreState = localEscadreProxy.State; 
+        
+        // Optional: Subscribe to events for logging confirmation when state arrives
+        LocalEscadreState.OnShopDesignsChanged += HandleShopDesignsChanged_Debug;
+        LocalEscadreState.OnFormationChanged += HandleFormationChanged_Debug;
+        LocalEscadreState.OnResourcesChanged += HandleResourcesChanged_Debug;
+
 
         if (clientPresentationManager == null)
         {
@@ -85,22 +103,27 @@ public class ClientComposer : MonoBehaviour
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Initialization complete. Will attempt connection in OnEnable.");
     }
 
+    // --- Debug Event Handlers ---
+    private void HandleShopDesignsChanged_Debug() { Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Shop designs updated. Count: {LocalEscadreState.AvailableShopDesigns.Count}"); }
+    private void HandleFormationChanged_Debug() { Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Formation updated. Slot Count: {LocalEscadreState.FormationSlots.Count}"); }
+    private void HandleResourcesChanged_Debug() { Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Resources updated. Amount: {LocalEscadreState.Resources}"); }
+    // ---------------------------
+
+
     void OnEnable()
     {
         Logger.Log($"[ClientComposer {thisClientInstanceId}] OnEnable called.");
-        // Register S2C routing with the mock layer when this component becomes active
         if (mockNetworkLayer != null)
         {
             mockNetworkLayer.RegisterMockClientS2CRouting(thisClientInstanceId);
         }
-        // Attempt connection if not already attempted or active
-        if (!isConnectionAttempted && !isSessionActive)
+        if (!isConnectionAttempted && !isSessionFullyActive) 
         {
             RequestConnection();
         }
-        else if (isConnectionAttempted && !isSessionActive)
+        else if (isConnectionAttempted && !isSessionFullyActive)
         {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Connection previously attempted but session not active. Consider re-attempt logic or server status check.");
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Connection previously attempted but session not fully active. Waiting for server data.");
         }
     }
 
@@ -108,8 +131,8 @@ public class ClientComposer : MonoBehaviour
     {
         if (_clientNetworkAccess == null) { Logger.LogError($"[ClientComposer {thisClientInstanceId}] Network layer unavailable for connection request."); return; }
         
-        isConnectionAttempted = true; // Mark that an attempt is being made
-        isSessionActive = false; // Reset session status on new attempt
+        isConnectionAttempted = true; 
+        isSessionFullyActive = false; 
 
         string mockJwt = $"{thisClientInstanceId};{thisClientNickname};{thisClientIsAdmin.ToString().ToLowerInvariant()};{thisClientAuthTypeString}";
         
@@ -128,11 +151,29 @@ public class ClientComposer : MonoBehaviour
             currentTime_Display = _clientClock.CurrentTime;
         }
 
-        // Check if session became active (e.g., first proxy created)
-        if (!isSessionActive && isConnectionAttempted && _clientLevel != null && _clientLevel.ActiveProxies.Any())
+        if (!isSessionFullyActive && isConnectionAttempted)
         {
-            isSessionActive = true; 
-            Logger.Log($"[ClientComposer {thisClientInstanceId}] Detected active proxies. Game session is now active.");
+            bool entitiesExist = _clientLevel != null && _clientLevel.ActiveProxies.Any();
+            bool shopInfoExists = LocalEscadreState != null && LocalEscadreState.AvailableShopDesigns.Any();
+            bool formationInfoExists = LocalEscadreState != null && LocalEscadreState.FormationSlots.Any(s => s.ShipEntityId.HasValue);
+
+            if (entitiesExist && shopInfoExists && formationInfoExists)
+            {
+                isSessionFullyActive = true; 
+                Logger.Log($"[ClientComposer {thisClientInstanceId}] Game session is now FULLY active (initial entity, shop designs, and formation info received).");
+            }
+            else
+            {
+                // Log periodically (e.g., every 2 seconds = 120 frames at 60fps) which conditions are failing
+                if (Time.frameCount > 60 && Time.frameCount % 120 == 0) // Start logging after 1s, then every 2s
+                {
+                    string reasons = "";
+                    if (!entitiesExist) reasons += "Waiting for initial entity proxy. ";
+                    if (!shopInfoExists) reasons += "Waiting for shop designs info. ";
+                    if (!formationInfoExists) reasons += "Waiting for initial formation info (with ship ID). ";
+                    Logger.Log($"[ClientComposer {thisClientInstanceId}] Session not fully active yet. Reason(s): {reasons}");
+                }
+            }
         }
 
 
@@ -145,20 +186,14 @@ public class ClientComposer : MonoBehaviour
     void OnDisable()
     {
         Logger.Log($"[ClientComposer {thisClientInstanceId}] OnDisable called.");
-        if (isSessionActive && _clientNetworkAccess != null)
+        if (_clientNetworkAccess != null && isConnectionAttempted)
         {
-            Logger.Log($"[ClientComposer {thisClientInstanceId}] Session was active. Sending _ClientDisconnect message.");
-            // The payload for disconnect might be empty or could include the gameClientId if needed by a generic server handler.
-            // For our mock, the server can derive gameClientId from the sourceNetworkId.
-            _clientNetworkAccess.SendToServer(0, MessageType._ClientDisconnect, writer => {
-                // Optionally, send game client ID if JWT isn't implicitly tied to network source ID
-                // writer.Write(thisClientInstanceId); // Assuming thisClientInstanceId is also the game session ID after validation
-            });
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] Sending _ClientDisconnect message.");
+            _clientNetworkAccess.SendToServer(0, MessageType._ClientDisconnect, writer => {});
         }
-        isSessionActive = false; // Session is no longer active when disabled
-        isConnectionAttempted = false; // Allow re-connection attempt if re-enabled
+        isSessionFullyActive = false; 
+        isConnectionAttempted = false; 
 
-        // Unregister S2C routing with the mock layer
         if (mockNetworkLayer != null)
         {
             mockNetworkLayer.UnregisterMockClientS2CRouting(thisClientInstanceId);
@@ -166,29 +201,96 @@ public class ClientComposer : MonoBehaviour
     }
 
 
-    public void SimulateSendSetCourse(Core.Primitives.Vector2 destination)
+    [ContextMenu("Shop: Buy DefaultShip (Slot near last)")]
+    public void MockBuyDefaultShip()
     {
-        if (!isSessionActive) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Cannot send command, session not active."); return; }
-        if (_clientNetworkAccess == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Network layer unavailable."); return; }
+        if (!isSessionFullyActive) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not fully active. Cannot buy ship yet. Please wait for initial server data."); return; }
+        if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
+        if (LocalEscadreState == null || !LocalEscadreState.AvailableShopDesigns.Any())
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Shop designs not yet available on client or LocalEscadreState is null. This should be covered by 'isSessionFullyActive'.");
+            return;
+        }
 
-        Logger.Log($"[ClientComposer {thisClientInstanceId}] Simulating SendToServer: _SetCourse to {destination}");
-        _clientNetworkAccess.SendToServer(
-            0, 
-            MessageType._SetCourse,
-            writer => Core.Network.Proxies.SerializationUtils.WriteVector2(writer, destination)
-        );
+        var design = LocalEscadreState.AvailableShopDesigns.FirstOrDefault(d => d.ShipEntityType == Entity.EntityTypeEnum.DefaultShip);
+        if (design == null)
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] DefaultShip design not found in shop info. Available: {string.Join(", ", LocalEscadreState.AvailableShopDesigns.Select(x => x.Name))}");
+            return;
+        }
+        
+        float newX = 0;
+        float newY = LocalEscadreState.FormationSlots.Count * 2.5f; 
+        _gameActions.RequestBuyShip(design.DesignId, new Vector2(newX, newY)); 
+    }
+
+    [ContextMenu("Shop: Upgrade First Ship")]
+    public void MockUpgradeFirstShip()
+    {
+        if (!isSessionFullyActive) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not fully active. Cannot upgrade ship yet. Please wait for initial server data."); return; }
+        if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
+        if (LocalEscadreState == null || !LocalEscadreState.FormationSlots.Any(s => s.ShipEntityId.HasValue)) 
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Client formation data not yet available, no ships in formation, or LocalEscadreState is null. This should be covered by 'isSessionFullyActive'.");
+            return; 
+        }
+
+        var firstShipSlot = LocalEscadreState.FormationSlots.FirstOrDefault(s => s.ShipEntityId.HasValue);
+        if (firstShipSlot == null || !firstShipSlot.ShipEntityId.HasValue) 
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ship with an ID found in the current formation slots to upgrade (unexpected if 'isSessionFullyActive' is true and this path is reached).");
+            return;
+        }
+        _gameActions.RequestUpgradeShip(firstShipSlot.ShipEntityId.Value);
+    }
+
+    [ContextMenu("Formation: Set Random Valid Formation")]
+    public void MockSetRandomFormation()
+    {
+        if (!isSessionFullyActive) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not fully active. Cannot set formation yet. Please wait for initial server data."); return; }
+        if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
+
+        var shipsInFormation = LocalEscadreState.FormationSlots.Where(s => s.ShipEntityId.HasValue).ToList();
+        if (LocalEscadreState == null || !shipsInFormation.Any()) 
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Client formation data not yet available or no ships in formation to rearrange. This should be covered by 'isSessionFullyActive'.");
+            return; 
+        }
+        
+        var newLayout = new List<Tuple<int, Vector2>>();
+        float angleStep = 360f / shipsInFormation.Count;
+        float radius = 3f + (shipsInFormation.Count * 0.5f); 
+
+        for(int i=0; i < shipsInFormation.Count; i++)
+        {
+            var slot = shipsInFormation[i];
+            float angle = i * angleStep * Mathf.Deg2Rad;
+            Vector2 newOffset = new Vector2(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius);
+            newLayout.Add(new Tuple<int, Vector2>(slot.ShipEntityId.Value, newOffset));
+        }
+
+        if (newLayout.Any())
+        {
+            _gameActions.RequestSetFormation(newLayout);
+        } else { 
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ships with IDs found in local formation state to set (unexpected).");
+        }
     }
 
     void OnDestroy()
     {
         Logger.Log($"[ClientComposer {thisClientInstanceId}] OnDestroy: Cleaning up...");
-        // OnDisable already handles sending disconnect and unregistering S2C routing.
-        // Ensure EntityManager and ClientLevel are disposed.
+        if (LocalEscadreState != null)
+        {
+            LocalEscadreState.OnShopDesignsChanged -= HandleShopDesignsChanged_Debug;
+            LocalEscadreState.OnFormationChanged -= HandleFormationChanged_Debug;
+            LocalEscadreState.OnResourcesChanged -= HandleResourcesChanged_Debug;
+        }
+
         _entityManager?.Dispose(); 
         _entityManager = null;
-        _clientLevel?.Dispose(); 
-        _clientLevel = null;
-
+        _gameActions = null;
+        LocalEscadreState = null; 
         _clientNetworkAccess = null;
         _clientClock = null; 
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Cleanup complete.");

@@ -51,21 +51,12 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
     [ContextMenu("Set Ship Movement Target To ActionTargetGizmo Position")]
     protected void SetShipMovementTargetToGizmo()
     {
-        if (TargetDefaultShip == null || TargetDefaultShip.IsDead) { 
+        if (TargetDefaultShip == null || TargetDefaultShip.IsDead)
+        {
             Logger.LogWarning($"[DefaultShipDebugBehaviour:{entityId}] Ship is null or dead.");
-            return; 
-        }
-        if (actionTargetGizmo == null) { // Use actionTargetGizmo from base
-            Logger.LogWarning($"[DefaultShipDebugBehaviour:{entityId}] Action Target Gizmo not assigned in inspector.");
-            return; 
-        }
-        if (!actionTargetGizmo.gameObject.activeSelf) {
-            actionTargetGizmo.position = transform.position + transform.forward * 10f; // Default activation position
-            actionTargetGizmo.gameObject.SetActive(true);
-            Logger.Log($"[DefaultShipDebugBehaviour:{entityId}] Activated action target gizmo. Move it and click Set Movement Target again."); 
             return;
         }
-        Core.Primitives.Vector2 targetPos2D = new Core.Primitives.Vector2(actionTargetGizmo.position.x, actionTargetGizmo.position.z);
+        Core.Primitives.Vector2 targetPos2D = new Core.Primitives.Vector2(transform.position.x, transform.position.z);
         Logger.Log($"[DefaultShipDebugBehaviour:{entityId}] Calling Ship.SetMovementTarget({targetPos2D}) using ActionTargetGizmo.");
         TargetDefaultShip.SetMovementTarget(targetPos2D, Time.time); 
     }
