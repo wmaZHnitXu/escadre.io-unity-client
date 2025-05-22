@@ -7,35 +7,29 @@ using Core.Time;
 using Logger = Core.Logging.Logger;
 using System.IO;
 using System.Linq;
-using System.Collections.Generic; // For List, Tuple
-using Core.Primitives; // For Vector2
+using System.Collections.Generic;
+using Core.Primitives;
 using System;
 using Vector2 = Core.Primitives.Vector2;
-using Core.Model;
-using Core.Network.Proxies; // For Tuple
+using Core.Model; 
+using Core.Network.Proxies; 
 
 public class ClientComposer : MonoBehaviour
 {
     [Header("Network")]
     [SerializeField]
-    [Tooltip("Assign the MockNetworkLayer GameObject from the scene here.")]
     private MockNetworkLayer mockNetworkLayer;
     [SerializeField]
-    [Tooltip("Client ID to use for this instance (for JWT generation in mock). This acts as the Network Source ID for the mock layer.")]
     private int thisClientInstanceId = 1; 
     [SerializeField]
-    [Tooltip("Nickname for this client instance (for JWT generation in mock).")]
     private string thisClientNickname = "Player";
      [SerializeField]
-    [Tooltip("AuthType for this client instance (for JWT generation in mock). Options: NoAccount, Account")]
     private string thisClientAuthTypeString = "Account"; 
     [SerializeField]
     private bool thisClientIsAdmin = false;
 
-
     [Header("Presentation")]
     [SerializeField]
-    [Tooltip("Assign the ClientPresentationManager GameObject/Component from the scene here.")]
     private ClientPresentationManager clientPresentationManager;
 
     [Header("Debug Info")]
@@ -44,15 +38,18 @@ public class ClientComposer : MonoBehaviour
     [SerializeField, ReadOnly]
     private bool isConnectionAttempted = false;
     [SerializeField, ReadOnly]
-    private bool isSessionFullyActive = false; // Renamed for clarity
+    private bool isSessionFullyActive = false;
+    [SerializeField, ReadOnly]
+    private int localEscadreEntityId_Display = -1;
 
 
     private ClientLevel _clientLevel;
-    private ClientEntityManager _entityManager;
+    private ClientEntityManager _entityManager; // Handles S->C messages
     private IClientNetworkLayer _clientNetworkAccess; 
     private IClock _clientClock; 
-    private ClientGameActions _gameActions; 
-    public ClientEscadreState LocalEscadreState { get; private set; } 
+    private ClientGameActions _gameActions; // Handles C->S messages
+    
+    public EscadreProxy.ClientProxy LocalEscadreProxy { get; private set; } 
 
     void Awake()
     {
@@ -65,122 +62,167 @@ public class ClientComposer : MonoBehaviour
         {
             Logger.LogError($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer not assigned! Attempting to find.");
             mockNetworkLayer = FindObjectOfType<MockNetworkLayer>();
-            if (mockNetworkLayer == null)
-            {
-                Logger.LogError($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer not found. Client cannot function.");
-                enabled = false;
-                return;
-            }
+            if (mockNetworkLayer == null) { Logger.LogError($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer not found. Client cannot function."); enabled = false; return; }
             Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer found in scene. Assign in Inspector for robustness.");
         }
         _clientNetworkAccess = mockNetworkLayer;
+        // Set the defaultSendingClientId for this specific client instance's network layer interaction (S2C routing mainly)
         mockNetworkLayer.defaultSendingClientId = thisClientInstanceId; 
 
 
         _clientLevel = new ClientLevel(_clientClock); 
-        _entityManager = new ClientEntityManager(_clientNetworkAccess, _clientLevel, _clientClock);
-        _gameActions = new ClientGameActions(_clientNetworkAccess, thisClientInstanceId);
+        _entityManager = new ClientEntityManager(_clientNetworkAccess, _clientLevel, _clientClock); // _clientNetworkAccess subscribes its OnMessageReceived here
+        _gameActions = new ClientGameActions(_clientNetworkAccess, thisClientInstanceId); // Pass client ID for C->S messages
 
-        var localEscadreProxy = _entityManager.GetOrCreateEscadreProxy(thisClientInstanceId);
-        LocalEscadreState = localEscadreProxy.State; 
-        
-        // Optional: Subscribe to events for logging confirmation when state arrives
-        LocalEscadreState.OnShopDesignsChanged += HandleShopDesignsChanged_Debug;
-        LocalEscadreState.OnFormationChanged += HandleFormationChanged_Debug;
-        LocalEscadreState.OnResourcesChanged += HandleResourcesChanged_Debug;
+        _clientLevel.OnProxyAdded += TryFindAndAssignLocalEscadreProxy;
+        _clientLevel.OnProxyRemoved += HandleLocalEscadreProxyRemoval;
 
 
-        if (clientPresentationManager == null)
-        {
-            clientPresentationManager = GetComponent<ClientPresentationManager>();
-        }
-        if (clientPresentationManager != null)
-        {
-            clientPresentationManager.Initialize(_clientLevel); 
-            Logger.Log($"[ClientComposer {thisClientInstanceId}] ClientPresentationManager initialized.");
-        }
+        if (clientPresentationManager == null) clientPresentationManager = GetComponent<ClientPresentationManager>();
+        if (clientPresentationManager != null) clientPresentationManager.Initialize(_clientLevel); 
         
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Initialization complete. Will attempt connection in OnEnable.");
     }
+    
+    private void TryFindAndAssignLocalEscadreProxy(IClientProxy proxy)
+    {
+        if (proxy.EntityType == Entity.EntityTypeEnum.Escadre && proxy is EscadreProxy.ClientProxy escadreProxy)
+        {
+            // thisClientInstanceId is the Game Client ID, matches Escadre.OwnerClientId
+            if (escadreProxy.OwnerClientId == thisClientInstanceId) 
+            {
+                if (LocalEscadreProxy != null && LocalEscadreProxy.EntityId != escadreProxy.EntityId)
+                {
+                    Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] New local EscadreProxy (ID: {escadreProxy.EntityId}) assigned, replacing old one (ID: {LocalEscadreProxy.EntityId}).");
+                    UnsubscribeFromLocalEscadreEvents();
+                }
+                else if (LocalEscadreProxy != null && LocalEscadreProxy.EntityId == escadreProxy.EntityId)
+                {
+                     return; 
+                }
 
-    // --- Debug Event Handlers ---
-    private void HandleShopDesignsChanged_Debug() { Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Shop designs updated. Count: {LocalEscadreState.AvailableShopDesigns.Count}"); }
-    private void HandleFormationChanged_Debug() { Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Formation updated. Slot Count: {LocalEscadreState.FormationSlots.Count}"); }
-    private void HandleResourcesChanged_Debug() { Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Resources updated. Amount: {LocalEscadreState.Resources}"); }
-    // ---------------------------
+                LocalEscadreProxy = escadreProxy;
+                localEscadreEntityId_Display = LocalEscadreProxy.EntityId;
+                Logger.Log($"[ClientComposer {thisClientInstanceId}] Local EscadreProxy found and assigned! Entity ID: {LocalEscadreProxy.EntityId}, Owner: {LocalEscadreProxy.OwnerClientId}");
+                SubscribeToLocalEscadreEvents();
+                CheckSessionActivation();
+            }
+        }
+    }
+
+    private void HandleLocalEscadreProxyRemoval(IClientProxy proxy)
+    {
+        if (LocalEscadreProxy != null && proxy.EntityId == LocalEscadreProxy.EntityId)
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Local EscadreProxy (Entity ID: {LocalEscadreProxy.EntityId}) was removed.");
+            UnsubscribeFromLocalEscadreEvents();
+            LocalEscadreProxy = null;
+            localEscadreEntityId_Display = -1;
+            isSessionFullyActive = false; 
+        }
+    }
+
+    private void SubscribeToLocalEscadreEvents()
+    {
+        if (LocalEscadreProxy == null) return;
+        LocalEscadreProxy.OnShopDesignsChanged += HandleShopDesignsChanged_Debug;
+        LocalEscadreProxy.OnFormationChanged += HandleFormationChanged_Debug;
+        LocalEscadreProxy.OnResourcesChanged += HandleResourcesChanged_Debug;
+        LocalEscadreProxy.OnNicknameChanged += HandleNicknameChanged_Debug;
+    }
+
+    private void UnsubscribeFromLocalEscadreEvents()
+    {
+        if (LocalEscadreProxy == null) return;
+        LocalEscadreProxy.OnShopDesignsChanged -= HandleShopDesignsChanged_Debug;
+        LocalEscadreProxy.OnFormationChanged -= HandleFormationChanged_Debug;
+        LocalEscadreProxy.OnResourcesChanged -= HandleResourcesChanged_Debug;
+        LocalEscadreProxy.OnNicknameChanged -= HandleNicknameChanged_Debug;
+    }
+
+    private void HandleShopDesignsChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Shop designs updated. Count: {LocalEscadreProxy.AvailableShopDesigns.Count}"); CheckSessionActivation(); }
+    private void HandleFormationChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Formation updated. Slot Count: {LocalEscadreProxy.FormationSlots.Count}"); CheckSessionActivation(); }
+    private void HandleResourcesChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Resources updated. Amount: {LocalEscadreProxy.Resources}"); }
+    private void HandleNicknameChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Nickname updated. Value: '{LocalEscadreProxy.Nickname}'"); }
 
 
     void OnEnable()
     {
         Logger.Log($"[ClientComposer {thisClientInstanceId}] OnEnable called.");
-        if (mockNetworkLayer != null)
+        if (mockNetworkLayer != null) 
         {
-            mockNetworkLayer.RegisterMockClientS2CRouting(thisClientInstanceId);
+            // ClientEntityManager already subscribed in Awake. 
+            // MockNetworkLayer now needs a direct handler for routing S2C messages.
+            // The ClientEntityManager's HandleServerMessageBytes will be the handler.
+            // _entityManager.HandleServerMessageBytes is not directly accessible here.
+            // The subscription is done in ClientEntityManager's constructor using _clientNetworkAccess.OnMessageReceived += ...
+            // And IClientNetworkLayer.OnMessageReceived.add in MockNetworkLayer adds to _s2cHandlersByNetworkId.
+            // This part should be correct now with the new MockNetworkLayer structure.
         }
-        if (!isConnectionAttempted && !isSessionFullyActive) 
-        {
-            RequestConnection();
-        }
-        else if (isConnectionAttempted && !isSessionFullyActive)
-        {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Connection previously attempted but session not fully active. Waiting for server data.");
-        }
+        
+        if (!isConnectionAttempted && !isSessionFullyActive) RequestConnection();
+        else if (isConnectionAttempted && !isSessionFullyActive) Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Connection previously attempted but session not fully active. Waiting for server data.");
     }
 
     private void RequestConnection()
     {
         if (_clientNetworkAccess == null) { Logger.LogError($"[ClientComposer {thisClientInstanceId}] Network layer unavailable for connection request."); return; }
-        
-        isConnectionAttempted = true; 
-        isSessionFullyActive = false; 
-
+        isConnectionAttempted = true; isSessionFullyActive = false; 
         string mockJwt = $"{thisClientInstanceId};{thisClientNickname};{thisClientIsAdmin.ToString().ToLowerInvariant()};{thisClientAuthTypeString}";
-        
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Sending _ClientConnectRequest with Mock JWT: '{mockJwt}'");
-        _clientNetworkAccess.SendToServer(0, MessageType._ClientConnectRequest, writer => 
-        {
-            writer.Write(mockJwt); 
-        });
+        // Pass thisClientInstanceId as the sendingNetworkSourceId
+        _clientNetworkAccess.SendToServer(thisClientInstanceId, 0, MessageType._ClientConnectRequest, writer => writer.Write(mockJwt));
     }
 
+    private void CheckSessionActivation()
+    {
+        if (isSessionFullyActive) return; 
+
+        bool escadreProxyExists = LocalEscadreProxy != null;
+        bool shopInfoExists = escadreProxyExists && LocalEscadreProxy.AvailableShopDesigns.Any();
+        bool formationInfoReceived = escadreProxyExists; 
+
+        if (escadreProxyExists && shopInfoExists && formationInfoReceived)
+        {
+            isSessionFullyActive = true; 
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] Game session is now FULLY active (local EscadreProxy initialized with shop designs).");
+        }
+    }
 
     void Update()
     {
-        if (_clientClock != null)
-        {
-            currentTime_Display = _clientClock.CurrentTime;
-        }
+        if (_clientClock != null) currentTime_Display = _clientClock.CurrentTime;
 
-        if (!isSessionFullyActive && isConnectionAttempted)
+        if (!isSessionFullyActive && isConnectionAttempted && LocalEscadreProxy == null)
         {
-            bool entitiesExist = _clientLevel != null && _clientLevel.ActiveProxies.Any();
-            bool shopInfoExists = LocalEscadreState != null && LocalEscadreState.AvailableShopDesigns.Any();
-            bool formationInfoExists = LocalEscadreState != null && LocalEscadreState.FormationSlots.Any(s => s.ShipEntityId.HasValue);
-
-            if (entitiesExist && shopInfoExists && formationInfoExists)
+            if (Time.frameCount % 60 == 0) 
             {
-                isSessionFullyActive = true; 
-                Logger.Log($"[ClientComposer {thisClientInstanceId}] Game session is now FULLY active (initial entity, shop designs, and formation info received).");
-            }
-            else
-            {
-                // Log periodically (e.g., every 2 seconds = 120 frames at 60fps) which conditions are failing
-                if (Time.frameCount > 60 && Time.frameCount % 120 == 0) // Start logging after 1s, then every 2s
+                var foundProxy = _clientLevel.ActiveProxies.Values
+                    .OfType<EscadreProxy.ClientProxy>()
+                    .FirstOrDefault(ep => ep.OwnerClientId == thisClientInstanceId); // Match by game client ID
+                if (foundProxy != null)
                 {
-                    string reasons = "";
-                    if (!entitiesExist) reasons += "Waiting for initial entity proxy. ";
-                    if (!shopInfoExists) reasons += "Waiting for shop designs info. ";
-                    if (!formationInfoExists) reasons += "Waiting for initial formation info (with ship ID). ";
-                    Logger.Log($"[ClientComposer {thisClientInstanceId}] Session not fully active yet. Reason(s): {reasons}");
+                    TryFindAndAssignLocalEscadreProxy(foundProxy);
                 }
             }
         }
-
-
-        if (_clientLevel != null)
+        
+        if (!isSessionFullyActive && isConnectionAttempted)
         {
-            _clientLevel.DoUpdate(Time.deltaTime); 
+            CheckSessionActivation(); 
+
+            if (!isSessionFullyActive && Time.frameCount > 60 && Time.frameCount % 120 == 0) 
+            {
+                string reasons = "";
+                if (LocalEscadreProxy == null) reasons += "Waiting for local Escadre proxy. ";
+                else {
+                    if (!LocalEscadreProxy.AvailableShopDesigns.Any()) reasons += "Waiting for shop designs info on Escadre proxy. ";
+                }
+                Logger.Log($"[ClientComposer {thisClientInstanceId}] Session not fully active yet. Reason(s): {reasons}");
+            }
         }
+
+        if (_clientLevel != null) _clientLevel.DoUpdate(Time.deltaTime); 
     }
 
     void OnDisable()
@@ -189,14 +231,14 @@ public class ClientComposer : MonoBehaviour
         if (_clientNetworkAccess != null && isConnectionAttempted)
         {
             Logger.Log($"[ClientComposer {thisClientInstanceId}] Sending _ClientDisconnect message.");
-            _clientNetworkAccess.SendToServer(0, MessageType._ClientDisconnect, writer => {});
+            // Pass thisClientInstanceId as sendingNetworkSourceId
+            _clientNetworkAccess.SendToServer(thisClientInstanceId, 0, MessageType._ClientDisconnect, writer => {});
         }
-        isSessionFullyActive = false; 
-        isConnectionAttempted = false; 
-
-        if (mockNetworkLayer != null)
+        isSessionFullyActive = false; isConnectionAttempted = false; 
+        if (mockNetworkLayer != null) 
         {
-            mockNetworkLayer.UnregisterMockClientS2CRouting(thisClientInstanceId);
+            // Unregistration logic needs to be careful if handler is from EntityManager
+            // The MockNetworkLayer itself handles removal from _s2cHandlersByNetworkId in IClientNetworkLayer.OnMessageReceived.remove
         }
     }
 
@@ -204,41 +246,31 @@ public class ClientComposer : MonoBehaviour
     [ContextMenu("Shop: Buy DefaultShip (Slot near last)")]
     public void MockBuyDefaultShip()
     {
-        if (!isSessionFullyActive) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not fully active. Cannot buy ship yet. Please wait for initial server data."); return; }
+        if (!isSessionFullyActive || LocalEscadreProxy == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not active or LocalEscadreProxy missing. Cannot buy ship."); return; }
         if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
-        if (LocalEscadreState == null || !LocalEscadreState.AvailableShopDesigns.Any())
-        {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Shop designs not yet available on client or LocalEscadreState is null. This should be covered by 'isSessionFullyActive'.");
-            return;
-        }
-
-        var design = LocalEscadreState.AvailableShopDesigns.FirstOrDefault(d => d.ShipEntityType == Entity.EntityTypeEnum.DefaultShip);
+        
+        var design = LocalEscadreProxy.AvailableShopDesigns.FirstOrDefault(d => d.ShipEntityType == Entity.EntityTypeEnum.DefaultShip);
         if (design == null)
         {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] DefaultShip design not found in shop info. Available: {string.Join(", ", LocalEscadreState.AvailableShopDesigns.Select(x => x.Name))}");
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] DefaultShip design not found in shop info. Available: {string.Join(", ", LocalEscadreProxy.AvailableShopDesigns.Select(x => x.Name))}");
             return;
         }
         
         float newX = 0;
-        float newY = LocalEscadreState.FormationSlots.Count * 2.5f; 
+        float newY = LocalEscadreProxy.FormationSlots.Count * 2.5f; 
         _gameActions.RequestBuyShip(design.DesignId, new Vector2(newX, newY)); 
     }
 
     [ContextMenu("Shop: Upgrade First Ship")]
     public void MockUpgradeFirstShip()
     {
-        if (!isSessionFullyActive) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not fully active. Cannot upgrade ship yet. Please wait for initial server data."); return; }
+        if (!isSessionFullyActive || LocalEscadreProxy == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not active or LocalEscadreProxy missing. Cannot upgrade ship."); return; }
         if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
-        if (LocalEscadreState == null || !LocalEscadreState.FormationSlots.Any(s => s.ShipEntityId.HasValue)) 
-        {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Client formation data not yet available, no ships in formation, or LocalEscadreState is null. This should be covered by 'isSessionFullyActive'.");
-            return; 
-        }
-
-        var firstShipSlot = LocalEscadreState.FormationSlots.FirstOrDefault(s => s.ShipEntityId.HasValue);
+        
+        var firstShipSlot = LocalEscadreProxy.FormationSlots.FirstOrDefault(s => s.ShipEntityId.HasValue);
         if (firstShipSlot == null || !firstShipSlot.ShipEntityId.HasValue) 
         {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ship with an ID found in the current formation slots to upgrade (unexpected if 'isSessionFullyActive' is true and this path is reached).");
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ship with an ID found in the current formation slots to upgrade.");
             return;
         }
         _gameActions.RequestUpgradeShip(firstShipSlot.ShipEntityId.Value);
@@ -247,15 +279,11 @@ public class ClientComposer : MonoBehaviour
     [ContextMenu("Formation: Set Random Valid Formation")]
     public void MockSetRandomFormation()
     {
-        if (!isSessionFullyActive) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not fully active. Cannot set formation yet. Please wait for initial server data."); return; }
+        if (!isSessionFullyActive || LocalEscadreProxy == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not active or LocalEscadreProxy missing. Cannot set formation."); return; }
         if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
 
-        var shipsInFormation = LocalEscadreState.FormationSlots.Where(s => s.ShipEntityId.HasValue).ToList();
-        if (LocalEscadreState == null || !shipsInFormation.Any()) 
-        {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Client formation data not yet available or no ships in formation to rearrange. This should be covered by 'isSessionFullyActive'.");
-            return; 
-        }
+        var shipsInFormation = LocalEscadreProxy.FormationSlots.Where(s => s.ShipEntityId.HasValue).ToList();
+        if (!shipsInFormation.Any()) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ships in formation to rearrange."); return; }
         
         var newLayout = new List<Tuple<int, Vector2>>();
         float angleStep = 360f / shipsInFormation.Count;
@@ -265,33 +293,52 @@ public class ClientComposer : MonoBehaviour
         {
             var slot = shipsInFormation[i];
             float angle = i * angleStep * Mathf.Deg2Rad;
-            Vector2 newOffset = new Vector2(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius);
-            newLayout.Add(new Tuple<int, Vector2>(slot.ShipEntityId.Value, newOffset));
+            newLayout.Add(new Tuple<int, Vector2>(slot.ShipEntityId.Value, new Vector2(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius)));
         }
 
-        if (newLayout.Any())
+        if (newLayout.Any()) _gameActions.RequestSetFormation(newLayout);
+        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ships with IDs found in local formation state to set.");
+    }
+    
+    [ContextMenu("Command: Attack First Other Escadre")]
+    public void MockAttackFirstOtherEscadre()
+    {
+        if (!isSessionFullyActive || LocalEscadreProxy == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not active or LocalEscadreProxy missing."); return; }
+        if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
+
+        EscadreProxy.ClientProxy targetEscadre = _clientLevel.ActiveProxies.Values
+            .OfType<EscadreProxy.ClientProxy>()
+            .FirstOrDefault(ep => ep.EntityId != LocalEscadreProxy.EntityId && ep.OwnerClientId != thisClientInstanceId);
+
+        if (targetEscadre != null)
         {
-            _gameActions.RequestSetFormation(newLayout);
-        } else { 
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ships with IDs found in local formation state to set (unexpected).");
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] Ordering attack on Escadre Entity ID: {targetEscadre.EntityId} (Owner: {targetEscadre.OwnerClientId})");
+            _gameActions.SendAttackEscadre(targetEscadre.EntityId);
+        }
+        else
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No other escadres found to attack.");
         }
     }
+
 
     void OnDestroy()
     {
         Logger.Log($"[ClientComposer {thisClientInstanceId}] OnDestroy: Cleaning up...");
-        if (LocalEscadreState != null)
+        if (_clientLevel != null)
         {
-            LocalEscadreState.OnShopDesignsChanged -= HandleShopDesignsChanged_Debug;
-            LocalEscadreState.OnFormationChanged -= HandleFormationChanged_Debug;
-            LocalEscadreState.OnResourcesChanged -= HandleResourcesChanged_Debug;
+            _clientLevel.OnProxyAdded -= TryFindAndAssignLocalEscadreProxy;
+            _clientLevel.OnProxyRemoved -= HandleLocalEscadreProxyRemoval;
         }
+        UnsubscribeFromLocalEscadreEvents();
+        LocalEscadreProxy = null; 
 
+        // EntityManager's Dispose will unsubscribe from _networkLayer.OnMessageReceived
         _entityManager?.Dispose(); 
         _entityManager = null;
         _gameActions = null;
-        LocalEscadreState = null; 
-        _clientNetworkAccess = null;
+        _clientNetworkAccess = null; // This is the shared MockNetworkLayer, don't null it if others use it.
+                                    // Better: ClientComposer doesn't "own" it.
         _clientClock = null; 
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Cleanup complete.");
     }

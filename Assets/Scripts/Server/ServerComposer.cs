@@ -15,8 +15,8 @@ using System;
 
 using Logger = Core.Logging.Logger;
 using System.Linq;
-using Core.Session;
-// using Core.Network.Proxies; // Not directly used here anymore
+using Core.Session; // For IClientConnectionValidator, ClientIdentity etc.
+// using Core.Network.Proxies; // Not directly used here anymore, except for SerializationUtils in one action
 // using Core.Session; // Namespace Core.Session is used for IClientConnectionValidator, ClientIdentity etc.
 
 public class ServerComposer : MonoBehaviour
@@ -142,9 +142,20 @@ public class ServerComposer : MonoBehaviour
         if (mockNetworkLayer == null) { Logger.LogWarning("MockNetworkLayer not available."); return; }
         var clientNetwork = (IClientNetworkLayer)mockNetworkLayer; 
         Logger.Log($"[ServerComposer MB Action] Simulating Client Sync (Correct) from NetworkSourceID: {mockNetworkLayer.defaultSendingClientId} for Entity: {lastCreatedDebugEntity.Id}");
-        int hash = HashCode.Combine(lastCreatedDebugEntity.Position.GetHashCode(), lastCreatedDebugEntity.Rotation.GetHashCode(), ((Core.Model.DebugEntity)lastCreatedDebugEntity).Hydration.GetHashCode(), ((Core.Model.DebugEntity)lastCreatedDebugEntity).Guilt.GetHashCode());
+        
+        // Calculate checksum as the server would for DebugEntity
+        int hash = HashCode.Combine(lastCreatedDebugEntity.Position.GetHashCode(), 
+                                    lastCreatedDebugEntity.Rotation.GetHashCode(), 
+                                    lastCreatedDebugEntity.Hydration.GetHashCode(), 
+                                    lastCreatedDebugEntity.Guilt.GetHashCode());
         float checksum = (float)hash;
-        clientNetwork.SendToServer(lastCreatedDebugEntity.Id, MessageType._ClientSyncState, writer => writer.Write(checksum));
+
+        clientNetwork.SendToServer(
+            mockNetworkLayer.defaultSendingClientId, // sendingNetworkSourceId
+            lastCreatedDebugEntity.Id,               // contextEntityId
+            MessageType._ClientSyncState,            // messageType
+            writer => writer.Write(checksum)         // serializePayloadAction
+        );
     }
 
     [ContextMenu("3. Simulate Client Sync (Incorrect Checksum - needs Client running)")]
@@ -154,7 +165,13 @@ public class ServerComposer : MonoBehaviour
         var clientNetwork = (IClientNetworkLayer)mockNetworkLayer;
         Logger.Log($"[ServerComposer MB Action] Simulating Client Sync (Incorrect) from NetworkSourceID: {mockNetworkLayer.defaultSendingClientId} for Entity: {lastCreatedDebugEntity.Id}");
         float incorrectChecksum = 9876.54f;
-        clientNetwork.SendToServer(lastCreatedDebugEntity.Id, MessageType._ClientSyncState, writer => writer.Write(incorrectChecksum));
+
+        clientNetwork.SendToServer(
+            mockNetworkLayer.defaultSendingClientId, // sendingNetworkSourceId
+            lastCreatedDebugEntity.Id,               // contextEntityId
+            MessageType._ClientSyncState,            // messageType
+            writer => writer.Write(incorrectChecksum) // serializePayloadAction
+        );
     }
 
     [ContextMenu("4. Kill Last Debug Entity (Loud)")]
@@ -182,8 +199,13 @@ public class ServerComposer : MonoBehaviour
         var clientNetwork = (IClientNetworkLayer)mockNetworkLayer; 
         Core.Primitives.Vector2 newDest = new Core.Primitives.Vector2(UnityEngine.Random.Range(-50f, 50f), UnityEngine.Random.Range(-50f, 50f));
         Logger.Log($"[ServerComposer MB Action] Simulating C->S _SetCourse to {newDest} from NetworkSourceID: {mockNetworkLayer.defaultSendingClientId}");
-        // The command is global (entityId 0), server routes based on source of message (NetworkSourceID -> GameClientID)
-        clientNetwork.SendToServer(0, MessageType._SetCourse, writer => Core.Network.Proxies.SerializationUtils.WriteVector2(writer, newDest));
+        
+        clientNetwork.SendToServer(
+            mockNetworkLayer.defaultSendingClientId,                 // sendingNetworkSourceId
+            0,                                                       // contextEntityId (0 for client's own escadre commands)
+            MessageType._SetCourse,                                  // messageType
+            writer => Core.Network.Proxies.SerializationUtils.WriteVector2(writer, newDest) // serializePayloadAction
+        );
     }
 
     [ContextMenu("DEBUG: Force Unregister First Connected Client (if any)")]

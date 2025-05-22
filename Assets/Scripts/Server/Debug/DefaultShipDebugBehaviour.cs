@@ -13,9 +13,9 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
     [SerializeField, ReadOnly] protected float attackDamage;
     [SerializeField, ReadOnly] protected float attackRange;
     [SerializeField, ReadOnly] protected float attackCooldown;
-    [SerializeField, ReadOnly] protected int owningEscadreId;
+    [SerializeField, ReadOnly] protected int owningEscadreClientId_Display; // Renamed for clarity
+    [SerializeField, ReadOnly] protected int owningEscadreEntityId_Display = -1;
 
-    // Removed movementTargetGizmo, will use actionTargetGizmo from base class
 
     protected DefaultShip TargetDefaultShip => _targetEntity as DefaultShip;
 
@@ -23,7 +23,6 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
     {
         if (entity is DefaultShip defaultShip) {
             base.Initialize(defaultShip);
-            // actionTargetGizmo is initialized by base.Initialize if assigned
         } else {
             Logger.LogError($"[DefaultShipDebugBehaviour] Incorrect entity type: {entity?.GetType().Name}. Expected DefaultShip.");
             _targetEntity = null; enabled = false;
@@ -40,11 +39,13 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
             attackDamage = TargetDefaultShip.AttackDamage;
             attackRange = TargetDefaultShip.AttackRange;
             attackCooldown = TargetDefaultShip.AttackCooldown;
-            owningEscadreId = TargetDefaultShip.OwningEscadreClientId;
+            owningEscadreClientId_Display = TargetDefaultShip.OwningEscadreClientId;
+            owningEscadreEntityId_Display = TargetDefaultShip.OwningEscadre?.Id ?? -1; // OwningEscadre is the Escadre entity
         } else { 
             currentSpeed = 0; 
-            // Optionally zero out other stats or let them hold last known value
-            maxSpeed = 0; turnRate = 0; attackDamage = 0; attackRange = 0; attackCooldown = 0; owningEscadreId = -1;
+            maxSpeed = 0; turnRate = 0; attackDamage = 0; attackRange = 0; attackCooldown = 0; 
+            owningEscadreClientId_Display = -1;
+            owningEscadreEntityId_Display = -1;
         }
     }
 
@@ -68,8 +69,6 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
             Logger.LogWarning($"[DefaultShipDebugBehaviour:{entityId}] Ship is null or dead.");
             return; 
         }
-        // Optionally hide the gizmo if it was only for movement target
-        // if (actionTargetGizmo != null) actionTargetGizmo.gameObject.SetActive(false);
         Logger.Log($"[DefaultShipDebugBehaviour:{entityId}] Calling Ship.SetMovementTarget(null)");
         TargetDefaultShip.SetMovementTarget(null, Time.time); 
     }
@@ -80,26 +79,18 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
         TargetDefaultShip.PerformUpgrade(); 
     }
     
-    // OnDrawGizmosSelected is removed to avoid conflict with base.OnDrawGizmos
-    // Base class OnDrawGizmos will draw the actionTargetGizmo line.
-    // We can add ship-specific gizmos here if needed, using OnDrawGizmos.
     protected override void OnDrawGizmos() 
     {
-        base.OnDrawGizmos(); // Call base to draw action target gizmo if active
+        base.OnDrawGizmos(); 
 
         if (TargetDefaultShip != null && !TargetDefaultShip.IsDead) {
-            // Draw Attack Range
             Color attackRangeColor = Color.red; 
-            attackRangeColor.a = 0.1f; // More transparent fill
+            attackRangeColor.a = 0.1f; 
             Gizmos.color = attackRangeColor;
-            // Unity's Handles.DrawSolidDisc could be used for a filled disc if in Editor namespace,
-            // but for Gizmos, multiple lines or a wire disk is standard.
-            // For simplicity, draw wire disk.
             DrawWireDisk(transform.position, TargetDefaultShip.AttackRange, Color.red, 32);
 
-            // Draw Forward Vector
-            Gizmos.color = Color.blue; // Different from base gizmo color for clarity
-            Gizmos.DrawLine(transform.position, transform.position + transform.forward * 3f); // Slightly longer line
+            Gizmos.color = Color.blue; 
+            Gizmos.DrawLine(transform.position, transform.position + transform.forward * 3f); 
         }
     }
 
