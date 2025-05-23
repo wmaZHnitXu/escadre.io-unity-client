@@ -459,6 +459,9 @@ MonoBehaviour:
   - EntityType: 1
     DebugPrefab: {fileID: 5066656195200630647, guid: 09520f4879fa2aa40a339adc3712d12a,
       type: 3}
+  - EntityType: 3
+    DebugPrefab: {fileID: 4379563721390693257, guid: 6eeb09fe5225b9d44a732484ae935860,
+      type: 3}
   debugObjectParent: {fileID: 0}
 --- !u!114 &709566213
 MonoBehaviour:

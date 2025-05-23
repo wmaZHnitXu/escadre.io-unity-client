@@ -10,11 +10,9 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
     [SerializeField, ReadOnly] protected float currentSpeed;
     [SerializeField, ReadOnly] protected float maxSpeed; 
     [SerializeField, ReadOnly] protected float turnRate;
-    [SerializeField, ReadOnly] protected float attackDamage;
-    [SerializeField, ReadOnly] protected float attackRange;
-    [SerializeField, ReadOnly] protected float attackCooldown;
     [SerializeField, ReadOnly] protected int owningEscadreClientId_Display; // Renamed for clarity
     [SerializeField, ReadOnly] protected int owningEscadreEntityId_Display = -1;
+    [SerializeField, ReadOnly] protected int cannonCount_Display = 0;
 
 
     protected DefaultShip TargetDefaultShip => _targetEntity as DefaultShip;
@@ -36,16 +34,15 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
             currentSpeed = TargetDefaultShip.CurrentSpeed;
             maxSpeed = TargetDefaultShip.MaxSpeed; 
             turnRate = TargetDefaultShip.TurnRate;
-            attackDamage = TargetDefaultShip.AttackDamage;
-            attackRange = TargetDefaultShip.AttackRange;
-            attackCooldown = TargetDefaultShip.AttackCooldown;
             owningEscadreClientId_Display = TargetDefaultShip.OwningEscadreClientId;
             owningEscadreEntityId_Display = TargetDefaultShip.OwningEscadre?.Id ?? -1; // OwningEscadre is the Escadre entity
+            cannonCount_Display = TargetDefaultShip.Cannons?.Count ?? 0;
         } else { 
             currentSpeed = 0; 
-            maxSpeed = 0; turnRate = 0; attackDamage = 0; attackRange = 0; attackCooldown = 0; 
+            maxSpeed = 0; turnRate = 0; 
             owningEscadreClientId_Display = -1;
             owningEscadreEntityId_Display = -1;
+            cannonCount_Display = 0;
         }
     }
 
@@ -84,11 +81,6 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
         base.OnDrawGizmos(); 
 
         if (TargetDefaultShip != null && !TargetDefaultShip.IsDead) {
-            Color attackRangeColor = Color.red; 
-            attackRangeColor.a = 0.1f; 
-            Gizmos.color = attackRangeColor;
-            DrawWireDisk(transform.position, TargetDefaultShip.AttackRange, Color.red, 32);
-
             Gizmos.color = Color.blue; 
             Gizmos.DrawLine(transform.position, transform.position + transform.forward * 3f); 
         }
@@ -99,7 +91,7 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
         if (radius <= 0 || segments <= 2) return; 
         Color oldColor = Gizmos.color; 
         Gizmos.color = color;
-        float angleStep = 360.0f / segments; 
+        float angleStep = 360.0f / segments;
         UnityEngine.Vector3 prevPoint = position + UnityEngine.Quaternion.Euler(0, 0, 0) * UnityEngine.Vector3.forward * radius;
         for (int i = 1; i <= segments; i++) { 
             float angle = i * angleStep; 
