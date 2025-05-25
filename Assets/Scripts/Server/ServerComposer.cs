@@ -6,18 +6,13 @@ using Core.Visibility;
 using ServerSpecific.Debug; 
 using ServerSpecific.Session; 
 using Core.Logging;
-// using Core.Model; // Not directly used here anymore for entity creation
-// using Core.Primitives; // Not directly used here anymore
 using Core.Time; 
 using System;
-// using System.Collections.Generic; // Not directly used here anymore
-// using System.Linq; // Not directly used here anymore
-
-using Logger = Core.Logging.Logger;
 using System.Linq;
-using Core.Session; // For IClientConnectionValidator, ClientIdentity etc.
-// using Core.Network.Proxies; // Not directly used here anymore, except for SerializationUtils in one action
-// using Core.Session; // Namespace Core.Session is used for IClientConnectionValidator, ClientIdentity etc.
+using Core.Session; 
+using Core.Ocean; 
+using Logger = Core.Logging.Logger;
+
 
 public class ServerComposer : MonoBehaviour
 {
@@ -29,9 +24,15 @@ public class ServerComposer : MonoBehaviour
     [Tooltip("Assign the MockNetworkLayer GameObject/Component from the scene here.")]
     private MockNetworkLayer mockNetworkLayer; 
 
+    [Header("Ocean Data")]
+    [SerializeField]
+    [Tooltip("Assign the .bytes file containing the 3D ocean texture data here.")]
+    private TextAsset oceanTextureBytesFile;
+
     private IVisibilityStrategy _visibilityStrategy; 
     private IClock _serverClock; 
     private IClientConnectionValidator _connectionValidator; 
+    private IOceanDataProvider _serverOceanDataProvider; 
 
     [Header("Entity Debug Presentation")]
     [SerializeField] private DebugPresentationManager entityDebugPresentationManager;
@@ -43,7 +44,7 @@ public class ServerComposer : MonoBehaviour
     [SerializeField, ReadOnly] 
     private float currentTime_Display;
 
-    private Core.Model.DebugEntity lastCreatedDebugEntity; // Keep for debug actions targeting an entity
+    private Core.Model.DebugEntity lastCreatedDebugEntity; 
 
 
     void Awake()
@@ -75,8 +76,45 @@ public class ServerComposer : MonoBehaviour
         _visibilityStrategy = new DummyVisibilityStrategy();
         _connectionValidator = new MockClientConnectionValidator(); 
 
+        // Initialize Server Ocean Data Provider
+        var oceanSettings = new OceanSettings(
+            displacementScale: 1.5f, 
+            textureTileWorldSize: 128f, 
+            textureTimeLoopDuration: 20f
+            // Resolutions default to 64x64x64 as per problem spec
+        );
+        
+        byte[] loadedOceanBytes = null;
+        if (oceanTextureBytesFile != null && oceanTextureBytesFile.bytes != null && oceanTextureBytesFile.bytes.Length > 0)
+        {
+            loadedOceanBytes = oceanTextureBytesFile.bytes;
+            int expectedSize = oceanSettings.TextureResolutionTime * oceanSettings.TextureResolutionXZ * oceanSettings.TextureResolutionXZ * 3;
+            if (loadedOceanBytes.Length == expectedSize)
+            {
+                Logger.Log($"[ServerComposer MB] Successfully loaded {loadedOceanBytes.Length} bytes from ocean texture file: {oceanTextureBytesFile.name}");
+            }
+            else
+            {
+                 Logger.LogWarning($"[ServerComposer MB] Ocean texture file '{oceanTextureBytesFile.name}' has unexpected size. Expected {expectedSize}, got {loadedOceanBytes.Length}. Ocean provider will use this data but it might be incorrect, or fall back to dummy if constructor logic decides.");
+                 // The provider constructor will decide if this data is usable or if it defaults to dummy.
+            }
+        }
+        else
+        {
+            Logger.LogWarning($"[ServerComposer MB] Ocean texture file '{oceanTextureBytesFile?.name ?? "NOT ASSIGNED"}' not assigned, empty, or failed to load. ServerOceanDataProvider will use dummy data.");
+        }
+        _serverOceanDataProvider = new ServerOceanDataProvider(oceanSettings, loadedOceanBytes);
+        Logger.Log("[ServerComposer MB] ServerOceanDataProvider initialized.");
+
+
         try {
-            _coreComposer = new Core.CoreComposer(mockNetworkLayer, _visibilityStrategy, _serverClock, _connectionValidator);
+            _coreComposer = new Core.CoreComposer(
+                mockNetworkLayer, 
+                _visibilityStrategy, 
+                _serverClock, 
+                _connectionValidator,
+                _serverOceanDataProvider 
+            );
             mockNetworkLayer.SetVisibilityManager(_coreComposer.VisibilityManager);
         }
         catch (Exception ex) {
@@ -114,9 +152,15 @@ public class ServerComposer : MonoBehaviour
     }
     void OnDestroy() {
         Logger.Log("[ServerComposer MB] OnDestroy: Cleaning up...");
-        _coreComposer?.Dispose();
+        _coreComposer?.Dispose(); 
         _coreComposer = null;
         _serverClock = null; 
+        (_serverOceanDataProvider as IDisposable)?.Dispose(); // CoreComposer also disposes it if it was passed
+        _serverOceanDataProvider = null;
+
+        (_visibilityStrategy as IDisposable)?.Dispose();
+        _visibilityStrategy = null;
+
         Logger.Log("[ServerComposer MB] Cleanup complete.");
     }
 
@@ -129,8 +173,9 @@ public class ServerComposer : MonoBehaviour
     private void CreateDebugEntityAt(Core.Primitives.Vector3 position) {
         if (_coreComposer?.ServerLevel != null) {
             Logger.Log($"[ServerComposer MB Action] Requesting DebugEntity creation at {position}...");
-            lastCreatedDebugEntity = new Core.Model.DebugEntity(_coreComposer.ServerLevel); // Use full namespace
+            lastCreatedDebugEntity = new Core.Model.DebugEntity(_coreComposer.ServerLevel); 
             lastCreatedDebugEntity.Position = position; 
+            lastCreatedDebugEntity.FloatingBehavior = new DefaultFloatingBehavior(buoyancyFactor: 0.5f, verticalInterpolationSpeed: 1f);
         } else {
             Logger.LogWarning("[ServerComposer MB Action] CoreComposer or Level not initialized!");
         }
@@ -143,7 +188,6 @@ public class ServerComposer : MonoBehaviour
         var clientNetwork = (IClientNetworkLayer)mockNetworkLayer; 
         Logger.Log($"[ServerComposer MB Action] Simulating Client Sync (Correct) from NetworkSourceID: {mockNetworkLayer.defaultSendingClientId} for Entity: {lastCreatedDebugEntity.Id}");
         
-        // Calculate checksum as the server would for DebugEntity
         int hash = HashCode.Combine(lastCreatedDebugEntity.Position.GetHashCode(), 
                                     lastCreatedDebugEntity.Rotation.GetHashCode(), 
                                     lastCreatedDebugEntity.Hydration.GetHashCode(), 
@@ -151,10 +195,10 @@ public class ServerComposer : MonoBehaviour
         float checksum = (float)hash;
 
         clientNetwork.SendToServer(
-            mockNetworkLayer.defaultSendingClientId, // sendingNetworkSourceId
-            lastCreatedDebugEntity.Id,               // contextEntityId
-            MessageType._ClientSyncState,            // messageType
-            writer => writer.Write(checksum)         // serializePayloadAction
+            mockNetworkLayer.defaultSendingClientId, 
+            lastCreatedDebugEntity.Id,               
+            MessageType._ClientSyncState,            
+            writer => writer.Write(checksum)         
         );
     }
 
@@ -167,10 +211,10 @@ public class ServerComposer : MonoBehaviour
         float incorrectChecksum = 9876.54f;
 
         clientNetwork.SendToServer(
-            mockNetworkLayer.defaultSendingClientId, // sendingNetworkSourceId
-            lastCreatedDebugEntity.Id,               // contextEntityId
-            MessageType._ClientSyncState,            // messageType
-            writer => writer.Write(incorrectChecksum) // serializePayloadAction
+            mockNetworkLayer.defaultSendingClientId, 
+            lastCreatedDebugEntity.Id,               
+            MessageType._ClientSyncState,            
+            writer => writer.Write(incorrectChecksum) 
         );
     }
 
@@ -201,10 +245,10 @@ public class ServerComposer : MonoBehaviour
         Logger.Log($"[ServerComposer MB Action] Simulating C->S _SetCourse to {newDest} from NetworkSourceID: {mockNetworkLayer.defaultSendingClientId}");
         
         clientNetwork.SendToServer(
-            mockNetworkLayer.defaultSendingClientId,                 // sendingNetworkSourceId
-            0,                                                       // contextEntityId (0 for client's own escadre commands)
-            MessageType._SetCourse,                                  // messageType
-            writer => Core.Network.Proxies.SerializationUtils.WriteVector2(writer, newDest) // serializePayloadAction
+            mockNetworkLayer.defaultSendingClientId,                 
+            0,                                                       
+            MessageType._SetCourse,                                  
+            writer => Core.Network.Proxies.SerializationUtils.WriteVector2(writer, newDest) 
         );
     }
 

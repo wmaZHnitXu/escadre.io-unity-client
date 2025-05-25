@@ -13,6 +13,7 @@ using System;
 using Vector2 = Core.Primitives.Vector2;
 using Core.Model; 
 using Core.Network.Proxies; 
+using Core.Ocean; 
 
 public class ClientComposer : MonoBehaviour
 {
@@ -28,6 +29,13 @@ public class ClientComposer : MonoBehaviour
     [SerializeField]
     private bool thisClientIsAdmin = false;
 
+    [Header("Ocean Data")]
+    [SerializeField]
+    [Tooltip("Assign the .bytes file containing the 3D ocean texture data for the client.")]
+    private TextAsset oceanTextureBytesFile;
+    private byte[] _localOceanTextureBytes;
+
+
     [Header("Presentation")]
     [SerializeField]
     private ClientPresentationManager clientPresentationManager;
@@ -41,13 +49,15 @@ public class ClientComposer : MonoBehaviour
     private bool isSessionFullyActive = false;
     [SerializeField, ReadOnly]
     private int localEscadreEntityId_Display = -1;
+    [SerializeField, ReadOnly]
+    private bool isOceanReady_Display = false; 
 
 
     private ClientLevel _clientLevel;
-    private ClientEntityManager _entityManager; // Handles S->C messages
+    private ClientEntityManager _entityManager; 
     private IClientNetworkLayer _clientNetworkAccess; 
     private IClock _clientClock; 
-    private ClientGameActions _gameActions; // Handles C->S messages
+    private ClientGameActions _gameActions; 
     
     public EscadreProxy.ClientProxy LocalEscadreProxy { get; private set; } 
 
@@ -58,6 +68,19 @@ public class ClientComposer : MonoBehaviour
 
         _clientClock = new UnityClock(); 
 
+        // Load local ocean texture bytes
+        if (oceanTextureBytesFile != null && oceanTextureBytesFile.bytes != null && oceanTextureBytesFile.bytes.Length > 0)
+        {
+            _localOceanTextureBytes = oceanTextureBytesFile.bytes;
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] Successfully loaded {_localOceanTextureBytes.Length} bytes from local ocean texture file: {oceanTextureBytesFile.name}");
+        }
+        else
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Local ocean texture file '{oceanTextureBytesFile?.name ?? "NOT ASSIGNED"}' not assigned, empty, or failed to load. Ocean will use dummy data if server settings are received.");
+            _localOceanTextureBytes = null; // Ensure it's null if not loaded
+        }
+
+
         if (mockNetworkLayer == null)
         {
             Logger.LogError($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer not assigned! Attempting to find.");
@@ -66,13 +89,14 @@ public class ClientComposer : MonoBehaviour
             Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer found in scene. Assign in Inspector for robustness.");
         }
         _clientNetworkAccess = mockNetworkLayer;
-        // Set the defaultSendingClientId for this specific client instance's network layer interaction (S2C routing mainly)
         mockNetworkLayer.defaultSendingClientId = thisClientInstanceId; 
 
 
         _clientLevel = new ClientLevel(_clientClock); 
-        _entityManager = new ClientEntityManager(_clientNetworkAccess, _clientLevel, _clientClock); // _clientNetworkAccess subscribes its OnMessageReceived here
-        _gameActions = new ClientGameActions(_clientNetworkAccess, thisClientInstanceId); // Pass client ID for C->S messages
+        _clientLevel.OnOceanSettingsReceived += HandleOceanSettingsReceived; // Subscribe to settings event
+
+        _entityManager = new ClientEntityManager(_clientNetworkAccess, _clientLevel, _clientClock); 
+        _gameActions = new ClientGameActions(_clientNetworkAccess, thisClientInstanceId); 
 
         _clientLevel.OnProxyAdded += TryFindAndAssignLocalEscadreProxy;
         _clientLevel.OnProxyRemoved += HandleLocalEscadreProxyRemoval;
@@ -83,12 +107,27 @@ public class ClientComposer : MonoBehaviour
         
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Initialization complete. Will attempt connection in OnEnable.");
     }
+
+    private void HandleOceanSettingsReceived(OceanSettings settings)
+    {
+        if (settings == null)
+        {
+            Logger.LogError($"[ClientComposer {thisClientInstanceId}] Received null OceanSettings. Cannot initialize client ocean.");
+            return;
+        }
+        Logger.Log($"[ClientComposer {thisClientInstanceId}] Received OceanSettings from server. Initializing client-side ocean provider.");
+
+        // Use local bytes if available, otherwise provider will use dummy data.
+        var clientOceanProvider = new ClientTextureBasedOceanDataProvider(settings, _localOceanTextureBytes);
+        _clientLevel.InitializeOcean(clientOceanProvider);
+        isOceanReady_Display = _clientLevel.IsOceanInitialized; // Update debug display
+        CheckSessionActivation(); // Re-check if session can become active now
+    }
     
     private void TryFindAndAssignLocalEscadreProxy(IClientProxy proxy)
     {
         if (proxy.EntityType == Entity.EntityTypeEnum.Escadre && proxy is EscadreProxy.ClientProxy escadreProxy)
         {
-            // thisClientInstanceId is the Game Client ID, matches Escadre.OwnerClientId
             if (escadreProxy.OwnerClientId == thisClientInstanceId) 
             {
                 if (LocalEscadreProxy != null && LocalEscadreProxy.EntityId != escadreProxy.EntityId)
@@ -149,17 +188,6 @@ public class ClientComposer : MonoBehaviour
     void OnEnable()
     {
         Logger.Log($"[ClientComposer {thisClientInstanceId}] OnEnable called.");
-        if (mockNetworkLayer != null) 
-        {
-            // ClientEntityManager already subscribed in Awake. 
-            // MockNetworkLayer now needs a direct handler for routing S2C messages.
-            // The ClientEntityManager's HandleServerMessageBytes will be the handler.
-            // _entityManager.HandleServerMessageBytes is not directly accessible here.
-            // The subscription is done in ClientEntityManager's constructor using _clientNetworkAccess.OnMessageReceived += ...
-            // And IClientNetworkLayer.OnMessageReceived.add in MockNetworkLayer adds to _s2cHandlersByNetworkId.
-            // This part should be correct now with the new MockNetworkLayer structure.
-        }
-        
         if (!isConnectionAttempted && !isSessionFullyActive) RequestConnection();
         else if (isConnectionAttempted && !isSessionFullyActive) Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Connection previously attempted but session not fully active. Waiting for server data.");
     }
@@ -170,7 +198,6 @@ public class ClientComposer : MonoBehaviour
         isConnectionAttempted = true; isSessionFullyActive = false; 
         string mockJwt = $"{thisClientInstanceId};{thisClientNickname};{thisClientIsAdmin.ToString().ToLowerInvariant()};{thisClientAuthTypeString}";
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Sending _ClientConnectRequest with Mock JWT: '{mockJwt}'");
-        // Pass thisClientInstanceId as the sendingNetworkSourceId
         _clientNetworkAccess.SendToServer(thisClientInstanceId, 0, MessageType._ClientConnectRequest, writer => writer.Write(mockJwt));
     }
 
@@ -180,18 +207,18 @@ public class ClientComposer : MonoBehaviour
 
         bool escadreProxyExists = LocalEscadreProxy != null;
         bool shopInfoExists = escadreProxyExists && LocalEscadreProxy.AvailableShopDesigns.Any();
-        bool formationInfoReceived = escadreProxyExists; 
-
-        if (escadreProxyExists && shopInfoExists && formationInfoReceived)
+        
+        if (escadreProxyExists && shopInfoExists && _clientLevel.IsOceanInitialized) // Check IsOceanInitialized
         {
             isSessionFullyActive = true; 
-            Logger.Log($"[ClientComposer {thisClientInstanceId}] Game session is now FULLY active (local EscadreProxy initialized with shop designs).");
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] Game session is now FULLY active (local EscadreProxy initialized with shop designs and ocean data received).");
         }
     }
 
     void Update()
     {
         if (_clientClock != null) currentTime_Display = _clientClock.CurrentTime;
+        if (_clientLevel != null) isOceanReady_Display = _clientLevel.IsOceanInitialized; // Keep this updated
 
         if (!isSessionFullyActive && isConnectionAttempted && LocalEscadreProxy == null)
         {
@@ -199,7 +226,7 @@ public class ClientComposer : MonoBehaviour
             {
                 var foundProxy = _clientLevel.ActiveProxies.Values
                     .OfType<EscadreProxy.ClientProxy>()
-                    .FirstOrDefault(ep => ep.OwnerClientId == thisClientInstanceId); // Match by game client ID
+                    .FirstOrDefault(ep => ep.OwnerClientId == thisClientInstanceId); 
                 if (foundProxy != null)
                 {
                     TryFindAndAssignLocalEscadreProxy(foundProxy);
@@ -218,6 +245,7 @@ public class ClientComposer : MonoBehaviour
                 else {
                     if (!LocalEscadreProxy.AvailableShopDesigns.Any()) reasons += "Waiting for shop designs info on Escadre proxy. ";
                 }
+                if (!_clientLevel.IsOceanInitialized) reasons += "Waiting for ocean initialization data. ";
                 Logger.Log($"[ClientComposer {thisClientInstanceId}] Session not fully active yet. Reason(s): {reasons}");
             }
         }
@@ -231,15 +259,9 @@ public class ClientComposer : MonoBehaviour
         if (_clientNetworkAccess != null && isConnectionAttempted)
         {
             Logger.Log($"[ClientComposer {thisClientInstanceId}] Sending _ClientDisconnect message.");
-            // Pass thisClientInstanceId as sendingNetworkSourceId
             _clientNetworkAccess.SendToServer(thisClientInstanceId, 0, MessageType._ClientDisconnect, writer => {});
         }
         isSessionFullyActive = false; isConnectionAttempted = false; 
-        if (mockNetworkLayer != null) 
-        {
-            // Unregistration logic needs to be careful if handler is from EntityManager
-            // The MockNetworkLayer itself handles removal from _s2cHandlersByNetworkId in IClientNetworkLayer.OnMessageReceived.remove
-        }
     }
 
 
@@ -329,17 +351,16 @@ public class ClientComposer : MonoBehaviour
         {
             _clientLevel.OnProxyAdded -= TryFindAndAssignLocalEscadreProxy;
             _clientLevel.OnProxyRemoved -= HandleLocalEscadreProxyRemoval;
+            _clientLevel.OnOceanSettingsReceived -= HandleOceanSettingsReceived; 
         }
         UnsubscribeFromLocalEscadreEvents();
         LocalEscadreProxy = null; 
 
-        // EntityManager's Dispose will unsubscribe from _networkLayer.OnMessageReceived
         _entityManager?.Dispose(); 
         _entityManager = null;
         _gameActions = null;
-        _clientNetworkAccess = null; // This is the shared MockNetworkLayer, don't null it if others use it.
-                                    // Better: ClientComposer doesn't "own" it.
         _clientClock = null; 
+        _localOceanTextureBytes = null; // Clear byte array
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Cleanup complete.");
     }
 }
