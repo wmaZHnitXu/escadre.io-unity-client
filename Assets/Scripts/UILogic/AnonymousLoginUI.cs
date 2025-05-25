@@ -1,4 +1,3 @@
-// Scripts/UI/AnonymousLoginUI.cs
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -14,7 +13,6 @@ public class AnonymousLoginUI : UIScreen // Наследуемся от UIScreen
     [SerializeField] private Button playButton;
     [SerializeField] private TMP_Dropdown loginMethodDropdown;
     [SerializeField] private TMP_Dropdown serverDropdown;
-    // [SerializeField] private CanvasGroup panelCanvasGroup; // Это поле теперь в UIScreen
 
     // Убираем настройки анимации
     // [Header("Animation Settings")]
@@ -62,12 +60,6 @@ public class AnonymousLoginUI : UIScreen // Наследуемся от UIScreen
         }
     }
 
-    // Убираем ShowPanel/HidePanel, так как они теперь в UIScreen
-    // #region Public Methods for UIManager (Show/Hide)
-    // ...
-    // #endregion
-
-    // Переопределяем OnShow, если нужно что-то делать при показе этого экрана
     protected override void OnShow()
     {
         base.OnShow();
@@ -99,8 +91,7 @@ public class AnonymousLoginUI : UIScreen // Наследуемся от UIScreen
         // Например, сбросить поля ввода, если это необходимо
         // nicknameInputField.text = "";
     }
-
-
+    
     #region UI Element Logic
 
     private void OnNicknameInputValueChanged(string newNickname)
