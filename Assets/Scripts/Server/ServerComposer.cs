@@ -28,6 +28,10 @@ public class ServerComposer : MonoBehaviour
     [SerializeField]
     [Tooltip("Assign the .bytes file containing the 3D ocean texture data here.")]
     private TextAsset oceanTextureBytesFile;
+    [SerializeField]
+    [Tooltip("Optional: Assign an OceanDebugVisualizer instance from the scene, or a prefab to be instantiated.")]
+    private OceanDebugVisualizer serverOceanVisualizer;
+
 
     private IVisibilityStrategy _visibilityStrategy; 
     private IClock _serverClock; 
@@ -76,12 +80,10 @@ public class ServerComposer : MonoBehaviour
         _visibilityStrategy = new DummyVisibilityStrategy();
         _connectionValidator = new MockClientConnectionValidator(); 
 
-        // Initialize Server Ocean Data Provider
         var oceanSettings = new OceanSettings(
             displacementScale: 1.5f, 
             textureTileWorldSize: 128f, 
             textureTimeLoopDuration: 20f
-            // Resolutions default to 64x64x64 as per problem spec
         );
         
         byte[] loadedOceanBytes = null;
@@ -96,7 +98,6 @@ public class ServerComposer : MonoBehaviour
             else
             {
                  Logger.LogWarning($"[ServerComposer MB] Ocean texture file '{oceanTextureBytesFile.name}' has unexpected size. Expected {expectedSize}, got {loadedOceanBytes.Length}. Ocean provider will use this data but it might be incorrect, or fall back to dummy if constructor logic decides.");
-                 // The provider constructor will decide if this data is usable or if it defaults to dummy.
             }
         }
         else
@@ -105,6 +106,23 @@ public class ServerComposer : MonoBehaviour
         }
         _serverOceanDataProvider = new ServerOceanDataProvider(oceanSettings, loadedOceanBytes);
         Logger.Log("[ServerComposer MB] ServerOceanDataProvider initialized.");
+
+        // Initialize Server Ocean Visualizer
+        if (serverOceanVisualizer != null)
+        {
+            // If it's a prefab, instantiate it. If it's a scene instance, use it directly.
+            if (serverOceanVisualizer.gameObject.scene.name == null) // Check if it's a prefab
+            {
+                serverOceanVisualizer = Instantiate(serverOceanVisualizer, transform.position, Quaternion.identity, transform); // Instantiate as child
+                serverOceanVisualizer.name = "ServerOceanDebugVisualizer_Instance";
+            }
+            serverOceanVisualizer.Initialize(_serverOceanDataProvider, _serverClock);
+            Logger.Log("[ServerComposer MB] ServerOceanVisualizer initialized.");
+        }
+        else
+        {
+            Logger.LogWarning("[ServerComposer MB] ServerOceanVisualizer not assigned. No server-side ocean debug visualization.");
+        }
 
 
         try {
@@ -155,11 +173,19 @@ public class ServerComposer : MonoBehaviour
         _coreComposer?.Dispose(); 
         _coreComposer = null;
         _serverClock = null; 
-        (_serverOceanDataProvider as IDisposable)?.Dispose(); // CoreComposer also disposes it if it was passed
+        (_serverOceanDataProvider as IDisposable)?.Dispose(); 
         _serverOceanDataProvider = null;
 
         (_visibilityStrategy as IDisposable)?.Dispose();
         _visibilityStrategy = null;
+        
+        if (serverOceanVisualizer != null && serverOceanVisualizer.gameObject.scene.name != null && serverOceanVisualizer.transform.parent == transform)
+        {
+            // If it was instantiated as a child, destroy it
+            Destroy(serverOceanVisualizer.gameObject);
+        }
+        serverOceanVisualizer = null;
+
 
         Logger.Log("[ServerComposer MB] Cleanup complete.");
     }
