@@ -39,6 +39,13 @@ public class ClientComposer : MonoBehaviour
     [Tooltip("Optional: Assign an OceanDebugVisualizer instance for client-side visualization. If not assigned, it will try to find one on this GameObject or its children, or on the OceanSettingsProvider's GameObject or its children.")]
     private OceanDebugVisualizer clientOceanVisualizer;
 
+    [Header("Ocean Presentation (Client)")]
+    [SerializeField]
+    [Tooltip("Assign an OceanPresentation instance from the scene or a prefab to be instantiated. If prefab, ensure it's configured correctly.")]
+    private OceanPresentation oceanPresentation; // Can be a scene instance or a prefab
+    [SerializeField]
+    [Tooltip("The material to be used by the OceanPresentation. Should use the LowPolyOceanWater shader.")]
+    private Material oceanMaterial;
 
     [Header("Presentation")]
     [SerializeField]
@@ -81,6 +88,13 @@ public class ClientComposer : MonoBehaviour
                  Logger.LogError($"[ClientComposer {thisClientInstanceId}] OceanSettingsProvider not found in scene. Client-side ocean will be disabled until server sends settings.");
             }
         }
+        
+        // In ClientComposer.cs, replace the material setup section in Awake() with this:
+
+        if (oceanMaterial == null)
+        {
+            Logger.LogError($"[ClientComposer {thisClientInstanceId}] Ocean material not assigned! Please assign a material that uses the 'Custom/LowPolyOceanWater' shader in the inspector.");
+        }
 
 
         if (mockNetworkLayer == null)
@@ -93,7 +107,6 @@ public class ClientComposer : MonoBehaviour
         _clientNetworkAccess = mockNetworkLayer;
         mockNetworkLayer.defaultSendingClientId = thisClientInstanceId; 
 
-
         _clientLevel = new ClientLevel(_clientClock); 
         _clientLevel.OnOceanSettingsReceived += HandleOceanSettingsReceived; 
 
@@ -103,8 +116,18 @@ public class ClientComposer : MonoBehaviour
         _clientLevel.OnProxyAdded += TryFindAndAssignLocalEscadreProxy;
         _clientLevel.OnProxyRemoved += HandleLocalEscadreProxyRemoval;
         
-        // Setup Client Ocean Visualizer (it will be initialized fully when ocean data is ready)
-        if (clientOceanVisualizer == null) // If not assigned in inspector
+        SetupOceanDebugVisualizer();
+        SetupOceanPresentation();
+
+        if (clientPresentationManager == null) clientPresentationManager = GetComponent<ClientPresentationManager>();
+        if (clientPresentationManager != null) clientPresentationManager.Initialize(_clientLevel); 
+        
+        Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Initialization complete. Will attempt connection in OnEnable.");
+    }
+
+    private void SetupOceanDebugVisualizer()
+    {
+        if (clientOceanVisualizer == null) 
         {
             clientOceanVisualizer = GetComponentInChildren<OceanDebugVisualizer>();
              if (clientOceanVisualizer == null && oceanSettingsProvider != null)
@@ -115,7 +138,6 @@ public class ClientComposer : MonoBehaviour
 
         if (clientOceanVisualizer != null)
         {
-            // If visualizer is a prefab reference in the inspector field, instantiate it
             if (clientOceanVisualizer.gameObject.scene.name == null) 
             {
                 Transform parentTransform = (oceanSettingsProvider != null) ? oceanSettingsProvider.transform : transform;
@@ -128,12 +150,37 @@ public class ClientComposer : MonoBehaviour
         {
              Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] ClientOceanVisualizer not assigned or found. No client-side ocean debug visualization.");
         }
+    }
 
+    private void SetupOceanPresentation()
+    {
+        if (oceanPresentation == null) // If not assigned, try to find or create
+        {
+            oceanPresentation = FindObjectOfType<OceanPresentation>();
+            if (oceanPresentation == null)
+            {
+                Logger.Log($"[ClientComposer {thisClientInstanceId}] OceanPresentation not found in scene. Attempting to create from default settings.");
+                GameObject opGO = new GameObject("OceanPresentation_Instance");
+                opGO.transform.SetParent((oceanSettingsProvider != null) ? oceanSettingsProvider.transform : transform, false);
+                oceanPresentation = opGO.AddComponent<OceanPresentation>();
+            }
+        }
+        else if (oceanPresentation.gameObject.scene.name == null) // It's a prefab assigned in inspector
+        {
+            Transform parentTransform = (oceanSettingsProvider != null) ? oceanSettingsProvider.transform : this.transform;
+            oceanPresentation = Instantiate(oceanPresentation, parentTransform.position, UnityEngine.Quaternion.identity, parentTransform);
+            oceanPresentation.name = "OceanPresentation_InstanceFromPrefab";
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] Instantiated OceanPresentation from prefab.");
+        }
 
-        if (clientPresentationManager == null) clientPresentationManager = GetComponent<ClientPresentationManager>();
-        if (clientPresentationManager != null) clientPresentationManager.Initialize(_clientLevel); 
-        
-        Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Initialization complete. Will attempt connection in OnEnable.");
+        if (oceanPresentation != null)
+        {
+             Logger.Log($"[ClientComposer {thisClientInstanceId}] OceanPresentation is set up, waiting for ocean data to fully initialize.");
+        }
+        else
+        {
+            Logger.LogError($"[ClientComposer {thisClientInstanceId}] OceanPresentation could not be set up. Visual ocean will not be rendered.");
+        }
     }
 
     private void HandleOceanSettingsReceived(OceanSettings settings)
@@ -168,6 +215,22 @@ public class ClientComposer : MonoBehaviour
             clientOceanVisualizer.Initialize(_clientLevel.OceanDataProvider, _clientClock);
             Logger.Log($"[ClientComposer {thisClientInstanceId}] ClientOceanVisualizer fully initialized.");
         }
+
+        if (oceanPresentation != null && _clientLevel.OceanDataProvider != null && oceanMaterial != null && textureBytesToUse != null)
+        {
+            oceanPresentation.Initialize(_clientLevel.OceanDataProvider, _clientClock, textureBytesToUse, oceanMaterial);
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] OceanPresentation fully initialized.");
+        }
+        else
+        {
+            string reason = "";
+            if(oceanPresentation == null) reason += "OceanPresentation component missing. ";
+            if(_clientLevel.OceanDataProvider == null) reason += "OceanDataProvider not ready. ";
+            if(oceanMaterial == null) reason += "OceanMaterial missing. ";
+            if(textureBytesToUse == null) reason += "TextureBytes missing. ";
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] OceanPresentation could NOT be initialized. Reason(s): {reason}");
+        }
+
         CheckSessionActivation(); 
     }
     
@@ -230,7 +293,6 @@ public class ClientComposer : MonoBehaviour
     private void HandleFormationChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Formation updated. Slot Count: {LocalEscadreProxy.FormationSlots.Count}"); CheckSessionActivation(); }
     private void HandleResourcesChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Resources updated. Amount: {LocalEscadreProxy.Resources}"); }
     private void HandleNicknameChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Nickname updated. Value: '{LocalEscadreProxy.Nickname}'"); }
-
 
     void OnEnable()
     {
@@ -311,7 +373,6 @@ public class ClientComposer : MonoBehaviour
         isSessionFullyActive = false; isConnectionAttempted = false; 
     }
 
-
     [ContextMenu("Shop: Buy DefaultShip (Slot near last)")]
     public void MockBuyDefaultShip()
     {
@@ -390,7 +451,6 @@ public class ClientComposer : MonoBehaviour
         }
     }
 
-
     void OnDestroy()
     {
         Logger.Log($"[ClientComposer {thisClientInstanceId}] OnDestroy: Cleaning up...");
@@ -408,11 +468,17 @@ public class ClientComposer : MonoBehaviour
         _gameActions = null;
         _clientClock = null; 
         
-        if (clientOceanVisualizer != null && clientOceanVisualizer.gameObject.scene.name != null && clientOceanVisualizer.transform.parent == ((oceanSettingsProvider != null) ? oceanSettingsProvider.transform : transform) && clientOceanVisualizer.name.EndsWith("_Instance"))
+        if (clientOceanVisualizer != null && clientOceanVisualizer.gameObject.scene.name != null && clientOceanVisualizer.name.EndsWith("_Instance"))
         {
             Destroy(clientOceanVisualizer.gameObject);
         }
         clientOceanVisualizer = null;
+
+        if (oceanPresentation != null && oceanPresentation.gameObject.scene.name != null && (oceanPresentation.name.EndsWith("_Instance") || oceanPresentation.name.EndsWith("_InstanceFromPrefab")))
+        {
+            Destroy(oceanPresentation.gameObject);
+        }
+        oceanPresentation = null;
 
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Cleanup complete.");
     }
