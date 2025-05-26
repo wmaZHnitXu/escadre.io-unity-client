@@ -24,12 +24,14 @@ public class ServerComposer : MonoBehaviour
     [Tooltip("Assign the MockNetworkLayer GameObject/Component from the scene here.")]
     private MockNetworkLayer mockNetworkLayer; 
 
-    [Header("Ocean Data")]
+    [Header("Ocean Settings Provider")]
     [SerializeField]
-    [Tooltip("Assign the .bytes file containing the 3D ocean texture data here.")]
-    private TextAsset oceanTextureBytesFile;
+    [Tooltip("Assign the OceanSettingsProvider component that configures ocean parameters and texture data.")]
+    private OceanSettingsProvider oceanSettingsProvider;
+
+    [Header("Ocean Debug Visualizer (Server)")]
     [SerializeField]
-    [Tooltip("Optional: Assign an OceanDebugVisualizer instance from the scene, or a prefab to be instantiated.")]
+    [Tooltip("Optional: Assign an OceanDebugVisualizer instance from the scene for server-side visualization. If not assigned, it will try to find one on this GameObject or its children, or on the OceanSettingsProvider's GameObject or its children.")]
     private OceanDebugVisualizer serverOceanVisualizer;
 
 
@@ -80,48 +82,61 @@ public class ServerComposer : MonoBehaviour
         _visibilityStrategy = new DummyVisibilityStrategy();
         _connectionValidator = new MockClientConnectionValidator(); 
 
-        var oceanSettings = new OceanSettings(
-            displacementScale: 1.5f, 
-            textureTileWorldSize: 128f, 
-            textureTimeLoopDuration: 20f
-        );
-        
-        byte[] loadedOceanBytes = null;
-        if (oceanTextureBytesFile != null && oceanTextureBytesFile.bytes != null && oceanTextureBytesFile.bytes.Length > 0)
+        if (oceanSettingsProvider == null)
         {
-            loadedOceanBytes = oceanTextureBytesFile.bytes;
-            int expectedSize = oceanSettings.TextureResolutionTime * oceanSettings.TextureResolutionXZ * oceanSettings.TextureResolutionXZ * 3;
-            if (loadedOceanBytes.Length == expectedSize)
+            Logger.LogError("[ServerComposer MB] OceanSettingsProvider not assigned! Ocean data will not be available. Attempting to find in scene.");
+            oceanSettingsProvider = FindObjectOfType<OceanSettingsProvider>();
+            if (oceanSettingsProvider == null)
             {
-                Logger.Log($"[ServerComposer MB] Successfully loaded {loadedOceanBytes.Length} bytes from ocean texture file: {oceanTextureBytesFile.name}");
+                 Logger.LogError("[ServerComposer MB] OceanSettingsProvider not found in scene. Server-side ocean will be disabled.");
+            }
+        }
+
+        if (oceanSettingsProvider != null)
+        {
+            OceanSettings settings = oceanSettingsProvider.GetSettings();
+            byte[] loadedOceanBytes = oceanSettingsProvider.GetOceanTextureBytes();
+            _serverOceanDataProvider = new ServerOceanDataProvider(settings, loadedOceanBytes);
+            Logger.Log("[ServerComposer MB] ServerOceanDataProvider initialized using OceanSettingsProvider.");
+        }
+        else
+        {
+            _serverOceanDataProvider = null; 
+            Logger.LogWarning("[ServerComposer MB] ServerOceanDataProvider is null due to missing OceanSettingsProvider.");
+        }
+        
+        // Initialize Server Ocean Visualizer
+        if (serverOceanVisualizer == null) // If not assigned in inspector
+        {
+            serverOceanVisualizer = GetComponentInChildren<OceanDebugVisualizer>();
+            if (serverOceanVisualizer == null && oceanSettingsProvider != null)
+            {
+                 serverOceanVisualizer = oceanSettingsProvider.GetComponentInChildren<OceanDebugVisualizer>();
+            }
+        }
+        
+        if (serverOceanVisualizer != null)
+        {
+            if (_serverOceanDataProvider != null && _serverClock != null)
+            {
+                // If visualizer is a prefab reference in the inspector field, instantiate it
+                if (serverOceanVisualizer.gameObject.scene.name == null) 
+                {
+                     Transform parentTransform = (oceanSettingsProvider != null) ? oceanSettingsProvider.transform : transform;
+                     serverOceanVisualizer = Instantiate(serverOceanVisualizer, parentTransform.position, Quaternion.identity, parentTransform); 
+                     serverOceanVisualizer.name = "ServerOceanDebugVisualizer_Instance";
+                }
+                serverOceanVisualizer.Initialize(_serverOceanDataProvider, _serverClock);
+                Logger.Log("[ServerComposer MB] ServerOceanVisualizer initialized.");
             }
             else
             {
-                 Logger.LogWarning($"[ServerComposer MB] Ocean texture file '{oceanTextureBytesFile.name}' has unexpected size. Expected {expectedSize}, got {loadedOceanBytes.Length}. Ocean provider will use this data but it might be incorrect, or fall back to dummy if constructor logic decides.");
+                 Logger.LogWarning($"[ServerComposer MB] ServerOceanVisualizer found/assigned, but cannot initialize due to missing OceanDataProvider or Clock.");
             }
         }
         else
         {
-            Logger.LogWarning($"[ServerComposer MB] Ocean texture file '{oceanTextureBytesFile?.name ?? "NOT ASSIGNED"}' not assigned, empty, or failed to load. ServerOceanDataProvider will use dummy data.");
-        }
-        _serverOceanDataProvider = new ServerOceanDataProvider(oceanSettings, loadedOceanBytes);
-        Logger.Log("[ServerComposer MB] ServerOceanDataProvider initialized.");
-
-        // Initialize Server Ocean Visualizer
-        if (serverOceanVisualizer != null)
-        {
-            // If it's a prefab, instantiate it. If it's a scene instance, use it directly.
-            if (serverOceanVisualizer.gameObject.scene.name == null) // Check if it's a prefab
-            {
-                serverOceanVisualizer = Instantiate(serverOceanVisualizer, transform.position, Quaternion.identity, transform); // Instantiate as child
-                serverOceanVisualizer.name = "ServerOceanDebugVisualizer_Instance";
-            }
-            serverOceanVisualizer.Initialize(_serverOceanDataProvider, _serverClock);
-            Logger.Log("[ServerComposer MB] ServerOceanVisualizer initialized.");
-        }
-        else
-        {
-            Logger.LogWarning("[ServerComposer MB] ServerOceanVisualizer not assigned. No server-side ocean debug visualization.");
+            Logger.LogWarning("[ServerComposer MB] ServerOceanVisualizer not assigned or found. No server-side ocean debug visualization.");
         }
 
 
@@ -179,9 +194,9 @@ public class ServerComposer : MonoBehaviour
         (_visibilityStrategy as IDisposable)?.Dispose();
         _visibilityStrategy = null;
         
-        if (serverOceanVisualizer != null && serverOceanVisualizer.gameObject.scene.name != null && serverOceanVisualizer.transform.parent == transform)
+        if (serverOceanVisualizer != null && serverOceanVisualizer.gameObject.scene.name != null && serverOceanVisualizer.transform.parent == ((oceanSettingsProvider != null) ? oceanSettingsProvider.transform : transform) && serverOceanVisualizer.name.EndsWith("_Instance"))
         {
-            // If it was instantiated as a child, destroy it
+            // If it was instantiated as a child by this script, destroy it
             Destroy(serverOceanVisualizer.gameObject);
         }
         serverOceanVisualizer = null;

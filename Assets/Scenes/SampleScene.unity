@@ -418,6 +418,57 @@ Transform:
   m_Father: {fileID: 1202013260}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &544807141
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 544807143}
+  - component: {fileID: 544807142}
+  m_Layer: 0
+  m_Name: Ocean
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &544807142
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 544807141}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a587f5e8ea4663e4c8da058211440e56, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  oceanTextureBytesFile: {fileID: 4900000, guid: 105be25d5cbb1da42beaf26791d31a18,
+    type: 3}
+  displacementScale: 1
+  textureTileWorldSize: 128
+  textureTimeLoopDuration: 20
+  textureResolutionXZ: 64
+  textureResolutionTime: 64
+--- !u!4 &544807143
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 544807141}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 8.748063, y: -1.7610624, z: 0.90111405}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 9
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &709566211
 GameObject:
   m_ObjectHideFlags: 0
@@ -476,6 +527,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   mockNetworkLayer: {fileID: 1545813152}
+  oceanSettingsProvider: {fileID: 544807142}
+  serverOceanVisualizer: {fileID: 1720433151}
   entityDebugPresentationManager: {fileID: 709566212}
   clientDebugPresentationManager: {fileID: 709566215}
   currentTime_Display: 0
@@ -554,6 +607,64 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 5
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1070168090
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1070168092}
+  - component: {fileID: 1070168091}
+  m_Layer: 0
+  m_Name: OceanVisualiserClient
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1070168091
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1070168090}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 01c4d9a0d3e503b488c76af1a25b676e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  gridSize: 32
+  cellWorldSize: 2
+  visualizerCenterOffset: {x: 0, y: 0, z: 0}
+  pointSphereRadius: 0.1
+  drawInterpolatedOcean: 1
+  interpolatedDisplacementColor: {r: 0.2, g: 0.5, b: 1, a: 0.7}
+  drawInterpolatedNormals: 1
+  interpolatedNormalColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  normalLineLength: 0.5
+  showNearestDiscreteTimeSlice: 0
+  discreteTimeSliceDisplacementColor: {r: 1, g: 0.5, b: 0.2, a: 0.7}
+  drawDiscreteTimeSliceNormals: 0
+  discreteTimeSliceNormalColor: {r: 1, g: 0.8, b: 0.2, a: 1}
+  currentNearestTimeSliceIndex_Display: 0
+--- !u!4 &1070168092
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1070168090}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 8
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1202013258
 GameObject:
   m_ObjectHideFlags: 0
@@ -588,11 +699,14 @@ MonoBehaviour:
   thisClientNickname: Player
   thisClientAuthTypeString: Account
   thisClientIsAdmin: 0
+  oceanSettingsProvider: {fileID: 544807142}
+  clientOceanVisualizer: {fileID: 1070168091}
   clientPresentationManager: {fileID: 411430313}
   currentTime_Display: 0
   isConnectionAttempted: 0
   isSessionFullyActive: 0
   localEscadreEntityId_Display: -1
+  isOceanReady_Display: 0
 --- !u!4 &1202013260
 Transform:
   m_ObjectHideFlags: 0
@@ -706,11 +820,14 @@ MonoBehaviour:
   thisClientNickname: Player
   thisClientAuthTypeString: Account
   thisClientIsAdmin: 0
+  oceanSettingsProvider: {fileID: 544807142}
+  clientOceanVisualizer: {fileID: 0}
   clientPresentationManager: {fileID: 1297019136}
   currentTime_Display: 0
   isConnectionAttempted: 0
   isSessionFullyActive: 0
   localEscadreEntityId_Display: -1
+  isOceanReady_Display: 0
 --- !u!4 &1539778662
 Transform:
   m_ObjectHideFlags: 0
@@ -771,4 +888,62 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 3
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1720433150
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1720433152}
+  - component: {fileID: 1720433151}
+  m_Layer: 0
+  m_Name: OceanVisualiserServer
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1720433151
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1720433150}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 01c4d9a0d3e503b488c76af1a25b676e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  gridSize: 32
+  cellWorldSize: 2
+  visualizerCenterOffset: {x: 0, y: 0, z: 0}
+  pointSphereRadius: 0.1
+  drawInterpolatedOcean: 1
+  interpolatedDisplacementColor: {r: 0.2, g: 0.5, b: 1, a: 0.7}
+  drawInterpolatedNormals: 1
+  interpolatedNormalColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  normalLineLength: 0.5
+  showNearestDiscreteTimeSlice: 0
+  discreteTimeSliceDisplacementColor: {r: 1, g: 0.5, b: 0.2, a: 0.7}
+  drawDiscreteTimeSliceNormals: 0
+  discreteTimeSliceNormalColor: {r: 1, g: 0.8, b: 0.2, a: 1}
+  currentNearestTimeSliceIndex_Display: 0
+--- !u!4 &1720433152
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1720433150}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 7
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

@@ -2,21 +2,33 @@
 using UnityEngine;
 using Core.Ocean;
 using Core.Time;
-using Core.Primitives; // For our Vector3, even though we convert to Unity's for Gizmos
+using Core.Primitives; 
+using System;
+using Vector3 = UnityEngine.Vector3; // For MathF
 
-[DefaultExecutionOrder(200)] // Ensure it runs after potential IOceanDataProvider setup
+[DefaultExecutionOrder(200)] 
 public class OceanDebugVisualizer : MonoBehaviour
 {
     [Header("Visualization Settings")]
-    [SerializeField, Range(8, 128)] private int gridSize = 32; // Number of points in X and Z
-    [SerializeField] private float cellWorldSize = 2.0f; // World size of each grid cell
-    [SerializeField] private UnityEngine.Vector3 visualizerCenterOffset = UnityEngine.Vector3.zero; // Offset from this GameObject's position
-    [SerializeField] private bool drawDisplacementPoints = true;
-    [SerializeField] private bool drawSurfaceNormals = true;
-    [SerializeField] private float normalLineLength = 0.5f;
-    [SerializeField] private Color displacementGizmoColor = new Color(0.2f, 0.5f, 1f, 0.7f);
-    [SerializeField] private Color normalGizmoColor = Color.yellow;
+    [SerializeField, Range(8, 128)] private int gridSize = 32; 
+    [SerializeField] private float cellWorldSize = 2.0f; 
+    [SerializeField] private Vector3 visualizerCenterOffset = Vector3.zero; 
     [SerializeField] private float pointSphereRadius = 0.1f;
+
+    [Header("Interpolated Ocean State")]
+    [SerializeField] private bool drawInterpolatedOcean = true;
+    [SerializeField] private Color interpolatedDisplacementColor = new Color(0.2f, 0.5f, 1f, 0.7f);
+    [SerializeField] private bool drawInterpolatedNormals = true;
+    [SerializeField] private Color interpolatedNormalColor = Color.yellow;
+    [SerializeField] private float normalLineLength = 0.5f;
+    
+    [Header("Nearest Discrete Time Slice")]
+    [SerializeField] private bool showNearestDiscreteTimeSlice = false;
+    [SerializeField] private Color discreteTimeSliceDisplacementColor = new Color(1f, 0.5f, 0.2f, 0.7f);
+    [SerializeField] private bool drawDiscreteTimeSliceNormals = false;
+    [SerializeField] private Color discreteTimeSliceNormalColor = new Color(1f, 0.8f, 0.2f);
+    [SerializeField, ReadOnly] private int currentNearestTimeSliceIndex_Display = 0;
+
 
     private IOceanDataProvider _oceanDataProvider;
     private IClock _clock;
@@ -43,59 +55,86 @@ public class OceanDebugVisualizer : MonoBehaviour
         Debug.Log($"[OceanDebugVisualizer] Initialized. Grid: {gridSize}x{gridSize}, CellSize: {cellWorldSize}", this);
     }
 
-    void OnDrawGizmosSelected() // Only draw when selected to save performance
+    void OnDrawGizmosSelected() 
     {
-        if (!_isInitialized || _oceanDataProvider == null || _clock == null)
+        if (!_isInitialized || _oceanDataProvider == null || _clock == null || _oceanDataProvider.Settings == null)
         {
             if (Application.isPlaying && !_isInitialized)
             {
-                // Draw a fallback gizmo if not initialized in play mode yet
                 Gizmos.color = Color.red;
-                Gizmos.DrawWireCube(transform.position + visualizerCenterOffset, new UnityEngine.Vector3(gridSize * cellWorldSize * 0.5f, 1f, gridSize * cellWorldSize * 0.5f));
-                Gizmos.DrawLine(transform.position + visualizerCenterOffset - UnityEngine.Vector3.up, transform.position + visualizerCenterOffset + UnityEngine.Vector3.up);
+                Gizmos.DrawWireCube(transform.position + visualizerCenterOffset, new Vector3(gridSize * cellWorldSize * 0.5f, 1f, gridSize * cellWorldSize * 0.5f));
+                Gizmos.DrawLine(transform.position + visualizerCenterOffset - Vector3.up, transform.position + visualizerCenterOffset + Vector3.up);
             }
             return;
         }
 
         float currentTime = _clock.CurrentTime;
-        UnityEngine.Vector3 gridOrigin = transform.position + visualizerCenterOffset - 
-                             new UnityEngine.Vector3(gridSize * cellWorldSize * 0.5f, 0, gridSize * cellWorldSize * 0.5f);
+        Vector3 gridOrigin = transform.position + visualizerCenterOffset - 
+                             new Vector3(gridSize * cellWorldSize * 0.5f, 0, gridSize * cellWorldSize * 0.5f);
+        OceanSettings settings = _oceanDataProvider.Settings;
 
-        for (int x = 0; x <= gridSize; x++) // Use <= to draw points for all grid lines
+        // Calculate nearest discrete time slice for display
+        float timeNormalizedForSliceIndex = (currentTime % settings.TextureTimeLoopDuration) / settings.TextureTimeLoopDuration;
+        float texTimeFloat = timeNormalizedForSliceIndex * (settings.TextureResolutionTime - 1);
+        currentNearestTimeSliceIndex_Display = (int)MathF.Round(texTimeFloat);
+        currentNearestTimeSliceIndex_Display = Math.Clamp(currentNearestTimeSliceIndex_Display, 0, settings.TextureResolutionTime - 1);
+        float timeForDiscreteSliceViz = (currentNearestTimeSliceIndex_Display / (float)Math.Max(1, settings.TextureResolutionTime - 1)) * settings.TextureTimeLoopDuration;
+
+
+        for (int x = 0; x <= gridSize; x++) 
         {
             for (int z = 0; z <= gridSize; z++)
             {
                 float worldX = gridOrigin.x + x * cellWorldSize;
                 float worldZ = gridOrigin.z + z * cellWorldSize;
-                float baseY = gridOrigin.y; // Base Y plane for visualization
+                float baseY = gridOrigin.y; 
 
-                Core.Primitives.Vector3 displacement = _oceanDataProvider.GetDisplacement(worldX, worldZ, currentTime);
-                
-                // Convert Core.Primitives.Vector3 to UnityEngine.Vector3 for Gizmos
-                UnityEngine.Vector3 unityDisplacement = new UnityEngine.Vector3(displacement.X, displacement.Y, displacement.Z);
-                UnityEngine.Vector3 basePoint = new UnityEngine.Vector3(worldX, baseY, worldZ);
-                UnityEngine.Vector3 displacedPoint = new UnityEngine.Vector3(
-                    basePoint.x + unityDisplacement.x, // Apply horizontal displacement to the original XZ
-                    baseY + unityDisplacement.y,       // Vertical displacement from the base Y
-                    basePoint.z + unityDisplacement.z  // Apply horizontal displacement to the original XZ
-                );
-
-
-                if (drawDisplacementPoints)
+                // Draw fully interpolated ocean state
+                if (drawInterpolatedOcean)
                 {
-                    Gizmos.color = displacementGizmoColor;
-                    Gizmos.DrawSphere(displacedPoint, pointSphereRadius);
-                    // Optionally, draw a line from base to displaced point
-                    // Gizmos.DrawLine(basePoint, displacedPoint); 
+                    Core.Primitives.Vector3 interpDisplacement = _oceanDataProvider.GetDisplacement(worldX, worldZ, currentTime);
+                    UnityEngine.Vector3 unityInterpDisp = new UnityEngine.Vector3(interpDisplacement.X, interpDisplacement.Y, interpDisplacement.Z);
+                    UnityEngine.Vector3 interpDisplacedPoint = new UnityEngine.Vector3(
+                        worldX + unityInterpDisp.x, 
+                        baseY + unityInterpDisp.y,       
+                        worldZ + unityInterpDisp.z  
+                    );
+
+                    Gizmos.color = interpolatedDisplacementColor;
+                    Gizmos.DrawSphere(interpDisplacedPoint, pointSphereRadius);
+
+                    if (drawInterpolatedNormals)
+                    {
+                        Core.Primitives.Vector3 coreInterpNormal = _oceanDataProvider.GetNormal(worldX, worldZ, currentTime);
+                        UnityEngine.Vector3 unityInterpNormal = new UnityEngine.Vector3(coreInterpNormal.X, coreInterpNormal.Y, coreInterpNormal.Z);
+                        
+                        Gizmos.color = interpolatedNormalColor;
+                        Gizmos.DrawLine(interpDisplacedPoint, interpDisplacedPoint + unityInterpNormal * normalLineLength);
+                    }
                 }
 
-                if (drawSurfaceNormals)
+                // Draw ocean state snapped to the nearest discrete time slice
+                if (showNearestDiscreteTimeSlice)
                 {
-                    Core.Primitives.Vector3 coreNormal = _oceanDataProvider.GetNormal(worldX, worldZ, currentTime);
-                    UnityEngine.Vector3 unityNormal = new UnityEngine.Vector3(coreNormal.X, coreNormal.Y, coreNormal.Z);
-                    
-                    Gizmos.color = normalGizmoColor;
-                    Gizmos.DrawLine(displacedPoint, displacedPoint + unityNormal * normalLineLength);
+                    Core.Primitives.Vector3 discreteTimeSliceDisplacement = _oceanDataProvider.GetDisplacement(worldX, worldZ, timeForDiscreteSliceViz);
+                    UnityEngine.Vector3 unityDiscreteDisp = new UnityEngine.Vector3(discreteTimeSliceDisplacement.X, discreteTimeSliceDisplacement.Y, discreteTimeSliceDisplacement.Z);
+                    UnityEngine.Vector3 discreteTimeSliceDisplacedPoint = new UnityEngine.Vector3(
+                        worldX + unityDiscreteDisp.x,
+                        baseY + unityDiscreteDisp.y,
+                        worldZ + unityDiscreteDisp.z
+                    );
+
+                    Gizmos.color = discreteTimeSliceDisplacementColor;
+                    Gizmos.DrawSphere(discreteTimeSliceDisplacedPoint, pointSphereRadius * 0.8f); // Slightly smaller sphere
+
+                    if (drawDiscreteTimeSliceNormals)
+                    {
+                        Core.Primitives.Vector3 coreDiscreteNormal = _oceanDataProvider.GetNormal(worldX, worldZ, timeForDiscreteSliceViz);
+                        UnityEngine.Vector3 unityDiscreteNormal = new UnityEngine.Vector3(coreDiscreteNormal.X, coreDiscreteNormal.Y, coreDiscreteNormal.Z);
+
+                        Gizmos.color = discreteTimeSliceNormalColor;
+                        Gizmos.DrawLine(discreteTimeSliceDisplacedPoint, discreteTimeSliceDisplacedPoint + unityDiscreteNormal * normalLineLength * 0.8f);
+                    }
                 }
             }
         }

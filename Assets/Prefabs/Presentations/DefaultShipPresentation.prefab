@@ -97,6 +97,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1c60cc1be885de24b8c331ffb0821323, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  PositionInterpolationSpeed: 5
+  RotationInterpolationSpeed: 5
   explosionEffectPrefab: {fileID: 9197626066388241180}
   explosionSound: {fileID: 0}
 --- !u!1 &7552700594079177148

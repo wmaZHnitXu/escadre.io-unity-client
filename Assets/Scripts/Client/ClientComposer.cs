@@ -29,14 +29,15 @@ public class ClientComposer : MonoBehaviour
     [SerializeField]
     private bool thisClientIsAdmin = false;
 
-    [Header("Ocean Data")]
+    [Header("Ocean Settings Provider")]
     [SerializeField]
-    [Tooltip("Assign the .bytes file containing the 3D ocean texture data for the client.")]
-    private TextAsset oceanTextureBytesFile;
+    [Tooltip("Assign the OceanSettingsProvider component that configures client-side ocean parameters and texture data.")]
+    private OceanSettingsProvider oceanSettingsProvider;
+    
+    [Header("Ocean Debug Visualizer (Client)")]
     [SerializeField]
-    [Tooltip("Optional: Assign an OceanDebugVisualizer instance from the scene, or a prefab to be instantiated for client-side visualization.")]
+    [Tooltip("Optional: Assign an OceanDebugVisualizer instance for client-side visualization. If not assigned, it will try to find one on this GameObject or its children, or on the OceanSettingsProvider's GameObject or its children.")]
     private OceanDebugVisualizer clientOceanVisualizer;
-    private byte[] _localOceanTextureBytes;
 
 
     [Header("Presentation")]
@@ -71,15 +72,14 @@ public class ClientComposer : MonoBehaviour
 
         _clientClock = new UnityClock(); 
 
-        if (oceanTextureBytesFile != null && oceanTextureBytesFile.bytes != null && oceanTextureBytesFile.bytes.Length > 0)
+        if (oceanSettingsProvider == null)
         {
-            _localOceanTextureBytes = oceanTextureBytesFile.bytes;
-            Logger.Log($"[ClientComposer {thisClientInstanceId}] Successfully loaded {_localOceanTextureBytes.Length} bytes from local ocean texture file: {oceanTextureBytesFile.name}");
-        }
-        else
-        {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Local ocean texture file '{oceanTextureBytesFile?.name ?? "NOT ASSIGNED"}' not assigned, empty, or failed to load. Ocean will use dummy data if server settings are received.");
-            _localOceanTextureBytes = null; 
+            Logger.LogError($"[ClientComposer {thisClientInstanceId}] OceanSettingsProvider not assigned! Ocean data will not be available for client. Attempting to find in scene.");
+            oceanSettingsProvider = FindObjectOfType<OceanSettingsProvider>();
+            if (oceanSettingsProvider == null)
+            {
+                 Logger.LogError($"[ClientComposer {thisClientInstanceId}] OceanSettingsProvider not found in scene. Client-side ocean will be disabled until server sends settings.");
+            }
         }
 
 
@@ -102,21 +102,31 @@ public class ClientComposer : MonoBehaviour
 
         _clientLevel.OnProxyAdded += TryFindAndAssignLocalEscadreProxy;
         _clientLevel.OnProxyRemoved += HandleLocalEscadreProxyRemoval;
-
+        
         // Setup Client Ocean Visualizer (it will be initialized fully when ocean data is ready)
+        if (clientOceanVisualizer == null) // If not assigned in inspector
+        {
+            clientOceanVisualizer = GetComponentInChildren<OceanDebugVisualizer>();
+             if (clientOceanVisualizer == null && oceanSettingsProvider != null)
+            {
+                 clientOceanVisualizer = oceanSettingsProvider.GetComponentInChildren<OceanDebugVisualizer>();
+            }
+        }
+
         if (clientOceanVisualizer != null)
         {
-            if (clientOceanVisualizer.gameObject.scene.name == null) // Prefab
+            // If visualizer is a prefab reference in the inspector field, instantiate it
+            if (clientOceanVisualizer.gameObject.scene.name == null) 
             {
-                clientOceanVisualizer = Instantiate(clientOceanVisualizer, transform.position, UnityEngine.Quaternion.identity, transform);
+                Transform parentTransform = (oceanSettingsProvider != null) ? oceanSettingsProvider.transform : transform;
+                clientOceanVisualizer = Instantiate(clientOceanVisualizer, parentTransform.position, UnityEngine.Quaternion.identity, parentTransform);
                 clientOceanVisualizer.name = "ClientOceanDebugVisualizer_Instance";
             }
-            // Don't call Initialize yet; wait for OceanDataProvider from server.
             Logger.Log($"[ClientComposer {thisClientInstanceId}] ClientOceanVisualizer is set up, waiting for ocean data to fully initialize.");
         }
         else
         {
-             Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] ClientOceanVisualizer not assigned. No client-side ocean debug visualization.");
+             Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] ClientOceanVisualizer not assigned or found. No client-side ocean debug visualization.");
         }
 
 
@@ -135,11 +145,24 @@ public class ClientComposer : MonoBehaviour
         }
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Received OceanSettings from server. Initializing client-side ocean provider.");
 
-        var clientOceanProvider = new ClientTextureBasedOceanDataProvider(settings, _localOceanTextureBytes);
+        byte[] textureBytesToUse = null;
+        if (oceanSettingsProvider != null)
+        {
+            textureBytesToUse = oceanSettingsProvider.GetOceanTextureBytes();
+            if (textureBytesToUse == null)
+            {
+                Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] OceanSettingsProvider did not provide texture bytes. ClientTextureBasedOceanDataProvider will use dummy data.");
+            }
+        }
+        else
+        {
+             Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No OceanSettingsProvider available to get local texture bytes. ClientTextureBasedOceanDataProvider will use dummy data.");
+        }
+
+        var clientOceanProvider = new ClientTextureBasedOceanDataProvider(settings, textureBytesToUse);
         _clientLevel.InitializeOcean(clientOceanProvider);
         isOceanReady_Display = _clientLevel.IsOceanInitialized; 
         
-        // Now that OceanDataProvider is ready in ClientLevel, initialize the visualizer
         if (clientOceanVisualizer != null && _clientLevel.OceanDataProvider != null)
         {
             clientOceanVisualizer.Initialize(_clientLevel.OceanDataProvider, _clientClock);
@@ -384,9 +407,8 @@ public class ClientComposer : MonoBehaviour
         _entityManager = null;
         _gameActions = null;
         _clientClock = null; 
-        _localOceanTextureBytes = null; 
         
-        if (clientOceanVisualizer != null && clientOceanVisualizer.gameObject.scene.name != null && clientOceanVisualizer.transform.parent == transform)
+        if (clientOceanVisualizer != null && clientOceanVisualizer.gameObject.scene.name != null && clientOceanVisualizer.transform.parent == ((oceanSettingsProvider != null) ? oceanSettingsProvider.transform : transform) && clientOceanVisualizer.name.EndsWith("_Instance"))
         {
             Destroy(clientOceanVisualizer.gameObject);
         }
