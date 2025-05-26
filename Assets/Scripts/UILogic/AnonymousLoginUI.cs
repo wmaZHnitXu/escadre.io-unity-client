@@ -1,98 +1,63 @@
+// Scripts/UI/AnonymousLoginUI.cs
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System;
-using System.Collections.Generic;
+using System.Collections.Generic; // Для списка серверов
 using Assets.Scripts.UILogic;
-// using DG.Tweening; // Убираем DoTween
 
-public class AnonymousLoginUI : UIScreen // Наследуемся от UIScreen
+public class AnonymousLoginUI : UIScreen
 {
     [Header("UI Elements")]
     [SerializeField] private TMP_InputField nicknameInputField;
     [SerializeField] private Button playButton;
     [SerializeField] private TMP_Dropdown loginMethodDropdown;
-    [SerializeField] private TMP_Dropdown serverDropdown;
-
-    // Убираем настройки анимации
-    // [Header("Animation Settings")]
-    // [SerializeField] private float animationDuration = 0.3f;
-    // [SerializeField] private Ease showEase = Ease.OutQuad;
-    // [SerializeField] private Ease hideEase = Ease.InQuad;
+    [SerializeField] private TMP_Dropdown serverDropdown; // Если нужен выбор сервера для анонимов
 
     private UIManager uiManager;
-    private MasterServerService masterServerService;
-    private ServerListService serverListService;
+    // private ServerListService serverListService; // Если сервер-лист нужен здесь
 
-    private List<GameServerInfoDto> availableServers = new List<GameServerInfoDto>();
+    // private List<GameServerInfoDto> availableServers = new List<GameServerInfoDto>(); // Если нужен сервер-лист
 
-    // Awake уже есть в UIScreen, если нужна специфичная логика для AnonymousLoginUI в Awake,
-    // можно переопределить, не забыв вызвать base.Awake()
     protected override void Awake()
     {
-        base.Awake(); // Вызываем Awake базового класса
-
-        // Ваша специфичная логика для Awake в AnonymousLoginUI, если нужна
-        uiManager = FindObjectOfType<UIManager>();
-        masterServerService = FindObjectOfType<MasterServerService>();
-        serverListService = FindObjectOfType<ServerListService>();
+        base.Awake();
+        uiManager = UIManager.Instance; // Предполагаем, что UIManager уже существует
+        // serverListService = FindObjectOfType<ServerListService>();
     }
 
     private void Start()
     {
-        playButton.onClick.AddListener(OnPlayButtonClicked);
-        nicknameInputField.onValueChanged.AddListener(OnNicknameInputValueChanged);
-        loginMethodDropdown.onValueChanged.AddListener(OnLoginMethodChanged);
-        serverDropdown.onValueChanged.AddListener(OnServerSelected);
+        playButton?.onClick.AddListener(OnPlayButtonClicked);
+        nicknameInputField?.onValueChanged.AddListener(OnNicknameInputValueChanged);
+        loginMethodDropdown?.onValueChanged.AddListener(OnLoginMethodChanged);
+        // serverDropdown?.onValueChanged.AddListener(OnServerSelected);
 
-        ValidateNickname(nicknameInputField.text);
+        ValidateNickname(nicknameInputField?.text ?? "");
         InitializeLoginMethodDropdown();
-        // В реальном проекте: FetchAndDisplayServerList();
-        // Для теста пока оставим так:
-        if (serverListService != null)
-        {
-             FetchAndDisplayServerList(); // Попробуем загрузить при старте
-        }
-        else
-        {
-            Debug.LogWarning("ServerListService not found on Start, using dummy data for servers.");
-            PopulateServerDropdownWithDummyData();
-        }
+        // PopulateServerDropdown(); // Если нужен сервер-лист
     }
 
     protected override void OnShow()
     {
         base.OnShow();
-        Debug.Log("Anonymous Login Screen Shown. Ready for input.");
-        // Установить значение "Без аккаунта" в выпадающем списке
+        Debug.Log("Anonymous Login Screen Shown.");
+        nicknameInputField.text = ""; // Очищаем поле ника при показе
+        ValidateNickname("");
+
         if (loginMethodDropdown != null)
         {
-            // Найти индекс опции "Без аккаунта"
             for (int i = 0; i < loginMethodDropdown.options.Count; i++)
             {
                 if (loginMethodDropdown.options[i].text == "Без аккаунта")
                 {
-                    // Используем SetValueWithoutNotify, чтобы не вызвать OnLoginMethodChanged снова и не уйти в цикл
                     loginMethodDropdown.SetValueWithoutNotify(i);
                     break;
                 }
             }
         }
-        // FetchAndDisplayServerList(); // Если нужно обновлять при каждом показе
-        // nicknameInputField.Select();
-        // nicknameInputField.ActivateInputField();
+        // FetchAndDisplayServerList(); // Если нужно обновлять список серверов
     }
-
-    // Переопределяем OnHide, если нужно что-то делать при скрытии
-    protected override void OnHide()
-    {
-        base.OnHide();
-        Debug.Log("Anonymous Login Screen Hidden.");
-        // Например, сбросить поля ввода, если это необходимо
-        // nicknameInputField.text = "";
-    }
-    
-    #region UI Element Logic
 
     private void OnNicknameInputValueChanged(string newNickname)
     {
@@ -102,61 +67,49 @@ public class AnonymousLoginUI : UIScreen // Наследуемся от UIScreen
     private void ValidateNickname(string nickname)
     {
         bool isValid = !string.IsNullOrWhiteSpace(nickname) && nickname.Length >= 3;
-        playButton.interactable = isValid;
-        // Убираем анимацию кнопки
-        // if (isValid)
-        // {
-        //     playButton.transform.DOScale(1.05f, 0.1f).SetLoops(2, LoopType.Yoyo);
-        // }
+        if (playButton != null) playButton.interactable = isValid;
     }
 
     private async void OnPlayButtonClicked()
     {
         string nickname = nicknameInputField.text;
-        if (string.IsNullOrWhiteSpace(nickname))
+        if (string.IsNullOrWhiteSpace(nickname) || nickname.Length < 3)
         {
-            Debug.LogError("Nickname cannot be empty!");
-            // nicknameInputField.transform.DOShakePosition(0.5f, new Vector3(10, 0, 0), 10, 90, false, true); // Убираем анимацию
+            Debug.LogError("Nickname is too short or empty!");
+            // TODO: Показать ошибку пользователю (например, всплывающее сообщение или подсветка поля)
+            // errorDisplay.Show("Никнейм должен содержать минимум 3 символа.");
             return;
         }
 
-        string selectedServerId = GetSelectedServerId();
-        if (string.IsNullOrEmpty(selectedServerId))
-        {
-            Debug.LogError("No server selected or server list is empty!");
-            // serverDropdown.transform.DOShakePosition(0.5f, new Vector3(10, 0, 0), 10, 90, false, true); // Убираем анимацию
-            return;
-        }
+        // string selectedServerId = GetSelectedServerId(); // Если есть выбор сервера
 
-        Debug.Log($"Attempting to login anonymously with Nickname: {nickname} to Server: {selectedServerId}");
+        Debug.Log($"Attempting to login anonymously with Nickname: {nickname}");
         SetUIInteractable(false);
+        // TODO: Показать индикатор загрузки (например, uiManager.ShowLoadingScreen(true))
 
-        if (masterServerService != null)
+        var (success, response, errorMessage) = await MasterServerApiService.Instance.GetAnonymousTokenAsync(nickname);
+
+        if (success && response != null)
         {
-            var (success, response, errorMessage) = await masterServerService.GetAnonymousTokenAsync(nickname);
-            if (success && response != null)
-            {
-                Debug.Log($"Anonymous login successful! Token: {response.AccessToken}");
-                // SessionManager.Instance.SetTokens(response.AccessToken, response.NewRefreshToken, response.AccessTokenExpiration);
-                // SessionManager.Instance.SetNickname(nickname);
-                // SessionManager.Instance.SetSelectedServer(GetSelectedServerInfo());
-                uiManager.SwitchToScreen(UIScreenType.GameUI);
-            }
-            else
-            {
-                Debug.LogError($"Anonymous login failed: {errorMessage}");
-                SetUIInteractable(true);
-            }
+            Debug.Log($"Anonymous login successful! User: {SessionManager.Instance?.CurrentUser?.Nickname}");
+            // SessionManager уже должен был создать сессию внутри GetAnonymousTokenAsync в MasterServerApiService
+            // Переключаемся на следующий экран (например, главное меню или лобби)
+            uiManager.SwitchToScreen(UIScreenType.UserProfileUI); // Или UIScreenType.MainMenu
         }
         else
         {
-            Debug.LogError("MasterServerService not found!");
-            SetUIInteractable(true);
+            Debug.LogError($"Anonymous login failed: {errorMessage}");
+            // TODO: Показать пользователю errorMessage
+            // errorDisplay.Show($"Ошибка входа: {errorMessage}");
         }
+
+        SetUIInteractable(true);
+        // TODO: Скрыть индикатор загрузки (uiManager.ShowLoadingScreen(false))
     }
 
     private void InitializeLoginMethodDropdown()
     {
+        if (loginMethodDropdown == null) return;
         loginMethodDropdown.ClearOptions();
         List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>
         {
@@ -164,130 +117,34 @@ public class AnonymousLoginUI : UIScreen // Наследуемся от UIScreen
             new TMP_Dropdown.OptionData("С аккаунтом")
         };
         loginMethodDropdown.AddOptions(options);
-        loginMethodDropdown.value = 0;
+        loginMethodDropdown.SetValueWithoutNotify(0); // "Без аккаунта" по умолчанию
         loginMethodDropdown.RefreshShownValue();
     }
 
     private void OnLoginMethodChanged(int index)
     {
-        // Убедимся, что ссылка на UIManager есть
-        if (uiManager == null) uiManager = FindObjectOfType<UIManager>();
-
+        if (loginMethodDropdown == null) return;
         string selectedMethod = loginMethodDropdown.options[index].text;
         Debug.Log($"AnonymousLoginUI: Login method changed to: {selectedMethod}");
 
         if (selectedMethod == "С аккаунтом")
         {
-            // Переключаемся на экран входа с аккаунтом
             uiManager.SwitchToScreen(UIScreenType.RegisteredLogin);
         }
-        // Если выбран "Без аккаунта", ничего дополнительно делать не нужно, т.к. мы уже на этом экране
     }
 
-    private void PopulateServerDropdownWithDummyData()
-    {
-        availableServers.Clear();
-        availableServers.Add(new GameServerInfoDto { Id = "moscow_1", Name = "Москва", Ping = 23 });
-        availableServers.Add(new GameServerInfoDto { Id = "europe_1", Name = "Европа", Ping = 50 });
-        UpdateServerDropdownDisplay();
-    }
-
-    public async void FetchAndDisplayServerList()
-    {
-        if (serverListService == null)
-        {
-            Debug.LogError("ServerListService not found! Using dummy data.");
-            PopulateServerDropdownWithDummyData();
-            return;
-        }
-
-        var (success, servers, errorMessage) = await serverListService.GetServerListAsync();
-        if (success && servers != null)
-        {
-            availableServers = servers;
-            UpdateServerDropdownDisplay();
-        }
-        else
-        {
-            Debug.LogError($"Failed to fetch server list: {errorMessage}");
-            availableServers.Clear();
-            UpdateServerDropdownDisplay();
-        }
-    }
-
-    private void UpdateServerDropdownDisplay()
-    {
-        serverDropdown.ClearOptions();
-        List<TMP_Dropdown.OptionData> serverOptions = new List<TMP_Dropdown.OptionData>();
-        if (availableServers.Count == 0)
-        {
-            serverOptions.Add(new TMP_Dropdown.OptionData("Нет доступных серверов"));
-            serverDropdown.interactable = false;
-        }
-        else
-        {
-            foreach (var server in availableServers)
-            {
-                serverOptions.Add(new TMP_Dropdown.OptionData($"{server.Name} ({server.Ping} мс)"));
-            }
-            serverDropdown.interactable = true;
-        }
-        serverDropdown.AddOptions(serverOptions);
-        if (availableServers.Count > 0) serverDropdown.value = 0;
-        serverDropdown.RefreshShownValue();
-    }
-
-    private void OnServerSelected(int index)
-    {
-        if (availableServers.Count > 0 && index >= 0 && index < availableServers.Count)
-        {
-            GameServerInfoDto selectedServer = availableServers[index];
-            Debug.Log($"Server selected: {selectedServer.Name} (ID: {selectedServer.Id})");
-        }
-    }
-
-    private string GetSelectedServerId()
-    {
-        if (availableServers.Count > 0 && serverDropdown.value >= 0 && serverDropdown.value < availableServers.Count)
-        {
-            return availableServers[serverDropdown.value].Id;
-        }
-        return null;
-    }
-
-    private GameServerInfoDto GetSelectedServerInfo()
-    {
-         if (availableServers.Count > 0 && serverDropdown.value >= 0 && serverDropdown.value < availableServers.Count)
-        {
-            return availableServers[serverDropdown.value];
-        }
-        return null;
-    }
-
-    #endregion
-
-    #region Helper Methods
     private void SetUIInteractable(bool interactable)
     {
-        // Если canvasGroup был автоматически добавлен в UIScreen, можно его использовать
-        // if (canvasGroup != null)
-        // {
-        //     canvasGroup.interactable = interactable;
-        // }
-        // else // Иначе, по старинке
-        // {
-            nicknameInputField.interactable = interactable;
-            playButton.interactable = interactable && !string.IsNullOrWhiteSpace(nicknameInputField.text);
-            loginMethodDropdown.interactable = interactable;
-            serverDropdown.interactable = interactable && availableServers.Count > 0;
-        // }
-
-        // Убираем анимацию прозрачности
-        // float targetAlpha = interactable ? 1f : 0.7f;
-        // nicknameInputField.GetComponent<CanvasGroup>()?.DOFade(targetAlpha, 0.1f);
-        // playButton.GetComponent<CanvasGroup>()?.DOFade(targetAlpha, 0.1f);
+        nicknameInputField.interactable = interactable;
+        if (playButton != null) playButton.interactable = interactable && !string.IsNullOrWhiteSpace(nicknameInputField.text) && nicknameInputField.text.Length >=3;
+        loginMethodDropdown.interactable = interactable;
+        if (serverDropdown != null) serverDropdown.interactable = interactable; // && availableServers.Count > 0;
+        if (canvasGroup != null) canvasGroup.interactable = interactable;
     }
-    #endregion
-}
 
-// DTO GameServerInfoDto и TokenResponseDto остаются как были (или из отдельных файлов)
+    // --- Логика для списка серверов (если нужна) ---
+    // private async void FetchAndDisplayServerList() { /* ... */ }
+    // private void UpdateServerDropdownDisplay() { /* ... */ }
+    // private string GetSelectedServerId() { /* ... */ }
+    // private void OnServerSelected(int index) { /* ... */ }
+}

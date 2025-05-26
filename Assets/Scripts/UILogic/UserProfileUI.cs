@@ -1,3 +1,4 @@
+// Scripts/UI/UserProfileUI.cs
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -6,27 +7,24 @@ using Assets.Scripts.UILogic;
 
 public class UserProfileUI : UIScreen
 {
-    [Header("UI Elements - User Profile")]
-    [SerializeField] private TMP_Text userNameText; // Для "Your Name"
+    [Header("UI Elements")]
+    [SerializeField] private TMP_Text userNameText;
     [SerializeField] private Button statsButton;
     [SerializeField] private Button logoutButton;
     [SerializeField] private Button playButton; // Большая кнопка ">"
 
-    // Дропдауны, если они специфичны для этого экрана
-    [SerializeField] private TMP_Dropdown loginMethodDropdown;
-    [SerializeField] private TMP_Dropdown serverDropdown;
+    [SerializeField] private TMP_Dropdown loginMethodDropdown; // Для возможности "выйти" через выбор "Без аккаунта"
+    [SerializeField] private TMP_Dropdown serverDropdown; // Если нужен выбор сервера
 
-    // Предполагаем, что есть некий SessionManager для хранения данных о пользователе
-    // private SessionManager sessionManager;
     private UIManager uiManager;
-    private MasterServerService masterServerService; // Для логаута
+    // private ServerListService serverListService; // Если сервер-лист нужен здесь
+    // private List<GameServerInfoDto> availableServers = new List<GameServerInfoDto>(); // Если нужен сервер-лист
 
     protected override void Awake()
     {
         base.Awake();
-        uiManager = FindObjectOfType<UIManager>();
-        masterServerService = FindObjectOfType<MasterServerService>();
-        // sessionManager = FindObjectOfType<SessionManager>(); // Или SessionManager.Instance
+        uiManager = UIManager.Instance;
+        // serverListService = FindObjectOfType<ServerListService>();
     }
 
     private void Start()
@@ -34,7 +32,6 @@ public class UserProfileUI : UIScreen
         statsButton?.onClick.AddListener(OnStatsButtonClicked);
         logoutButton?.onClick.AddListener(OnLogoutButtonClicked);
         playButton?.onClick.AddListener(OnPlayButtonClicked);
-
         loginMethodDropdown?.onValueChanged.AddListener(OnLoginMethodChanged);
         // serverDropdown?.onValueChanged.AddListener(OnServerSelected);
     }
@@ -43,43 +40,111 @@ public class UserProfileUI : UIScreen
     {
         base.OnShow();
         Debug.Log("User Profile Screen Shown.");
-        // Отображаем имя пользователя (пока заглушка)
-        // string currentUserName = sessionManager?.CurrentUser?.Nickname ?? "Player";
-        string currentUserName = PlayerPrefs.GetString("LastLoggedInNickname", "Player"); // Простая заглушка с PlayerPrefs
-        userNameText.text = currentUserName;
-
-        // Настраиваем дропдауны для этого экрана
+        UpdateUserInfo();
         InitializeLoginMethodDropdown();
-        // PopulateServerDropdown(); // Если нужен список серверов
+        // FetchAndDisplayServerList(); // Если нужен список серверов
+    }
+
+    private void UpdateUserInfo()
+    {
+        if (SessionManager.Instance != null && SessionManager.Instance.CurrentUser != null)
+        {
+            userNameText.text = SessionManager.Instance.CurrentUser.Nickname ?? "Игрок";
+        }
+        else
+        {
+            userNameText.text = "Гость"; // Или что-то другое для неавторизованного/анонимного
+        }
     }
 
     private void OnStatsButtonClicked()
     {
         Debug.Log("Stats button clicked. (Not implemented)");
-        // TODO: Переключиться на экран статистики
         // uiManager.SwitchToScreen(UIScreenType.PlayerStats);
     }
 
     private async void OnLogoutButtonClicked()
     {
         Debug.Log("Logout button clicked.");
-        // TODO: Вызвать masterServerService.LogoutAsync();
-        // После логаута очистить сессию и вернуться на экран логина
-        // sessionManager?.ClearSession();
-        PlayerPrefs.DeleteKey("UserAccessToken"); // Пример очистки токена
-        PlayerPrefs.DeleteKey("UserRefreshToken");
-        PlayerPrefs.DeleteKey("LastLoggedInNickname");
+        SetUIInteractable(false);
+        // TODO: uiManager.ShowLoadingScreen(true);
 
-        uiManager.SwitchToScreen(UIScreenType.AnonymousLogin); // Или RegisteredLogin
+        // MasterServerApiService.LogoutAsync должен очистить сессию в SessionManager
+        var (success, errorMessage) = await MasterServerApiService.Instance.LogoutAsync();
+
+        if (success)
+        {
+            Debug.Log("Logout successful via API.");
+        }
+        else
+        {
+            Debug.LogError($"Logout failed via API: {errorMessage}");
+            // Даже если на сервере ошибка, мы выходим локально
+        }
+        // MasterServerApiService.LogoutAsync уже должен был переключить на AnonymousLogin или подобный
+        // или SessionManager.OnLoginStateChanged может это сделать.
+        // На всякий случай, если этого не произошло:
+        if (SessionManager.Instance == null || !SessionManager.Instance.IsUserLoggedIn) // Проверяем, что сессия действительно очищена
+        {
+            uiManager.SwitchToScreen(UIScreenType.AnonymousLogin);
+        }
+        else
+        {
+           // Что-то пошло не так, сессия не очищена
+           SetUIInteractable(true);
+        }
+
+        // TODO: uiManager.ShowLoadingScreen(false);
+        // SetUIInteractable(true) здесь не нужно, т.к. мы переключаем экран
     }
 
     private void OnPlayButtonClicked()
     {
         Debug.Log("Play button clicked. (Not implemented)");
-        // TODO: Логика начала игры, возможно, с использованием выбранного сервера
         // string selectedServerId = GetSelectedServerId();
-        // ConnectToGameServer(selectedServerId);
+        // TODO: Логика начала игры, подключения к серверу и т.д.
+        // gameManager.StartGame(selectedServerId);
     }
+    
+    private void InitializeLoginMethodDropdown()
+    {
+        if (loginMethodDropdown == null) return;
+        loginMethodDropdown.ClearOptions();
+        List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>
+        {
+            new TMP_Dropdown.OptionData("Без аккаунта"),
+            new TMP_Dropdown.OptionData("С аккаунтом")
+        };
+        loginMethodDropdown.AddOptions(options);
+
+        // Устанавливаем значение в зависимости от текущего состояния сессии
+        if (SessionManager.Instance != null && SessionManager.Instance.IsUserLoggedIn && SessionManager.Instance.CurrentUser?.UserId != null && !SessionManager.Instance.CurrentUser.UserId.StartsWith("anonymous_"))
+        {
+            // Если пользователь залогинен с реальным аккаунтом
+            for (int i = 0; i < loginMethodDropdown.options.Count; i++)
+            {
+                if (loginMethodDropdown.options[i].text == "С аккаунтом")
+                {
+                    loginMethodDropdown.SetValueWithoutNotify(i);
+                    break;
+                }
+            }
+        }
+        else
+        {
+            // Если анонимный или не залогинен (хотя на этот экран без сессии не должны попадать)
+             for (int i = 0; i < loginMethodDropdown.options.Count; i++)
+            {
+                if (loginMethodDropdown.options[i].text == "Без аккаунта")
+                {
+                    loginMethodDropdown.SetValueWithoutNotify(i);
+                    break;
+                }
+            }
+        }
+        loginMethodDropdown.RefreshShownValue();
+    }
+
 
     private void OnLoginMethodChanged(int index)
     {
@@ -89,34 +154,37 @@ public class UserProfileUI : UIScreen
 
         if (selectedMethod == "Без аккаунта")
         {
-            // Если пользователь выбрал "Без аккаунта" будучи залогиненным,
-            // это фактически означает логаут и переход на анонимный вход.
-            OnLogoutButtonClicked(); // Выполняем полный логаут
-            // UIManager уже переключит экран в OnLogoutButtonClicked
-        }
-    }
-
-    private void InitializeLoginMethodDropdown()
-    {
-        if (loginMethodDropdown == null) return;
-        loginMethodDropdown.ClearOptions();
-        List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>
-        {
-            new TMP_Dropdown.OptionData("Без аккаунта"), // Опция для "быстрого" логаута и перехода
-            new TMP_Dropdown.OptionData("С аккаунтом")
-        };
-        loginMethodDropdown.AddOptions(options);
-
-        // На этом экране по умолчанию должно быть "С аккаунтом"
-        for (int i = 0; i < loginMethodDropdown.options.Count; i++)
-        {
-            if (loginMethodDropdown.options[i].text == "С аккаунтом")
+            // Если пользователь выбрал "Без аккаунта" на этом экране,
+            // это эквивалентно логауту (если он был залогинен с аккаунтом)
+            // и переходу на анонимный режим.
+            if (SessionManager.Instance != null && SessionManager.Instance.IsUserLoggedIn && SessionManager.Instance.CurrentUser?.UserId != null && !SessionManager.Instance.CurrentUser.UserId.StartsWith("anonymous_"))
             {
-                loginMethodDropdown.SetValueWithoutNotify(i); // Установить без вызова onValueChanged
-                break;
+                OnLogoutButtonClicked(); // Выполняем полный логаут
+            }
+            else
+            {
+                // Если он уже был анонимом или что-то странное, просто переключаем, если нужно
+                // Но обычно этот экран для залогиненных, так что такой выбор должен вести к логауту.
+                // Если мы хотим анонимный режим после логаута, то MasterServerApiService.LogoutAsync
+                // должен был переключить на AnonymousLogin или UIManager должен это сделать по событию от SessionManager
             }
         }
-        loginMethodDropdown.RefreshShownValue();
+        // Если выбран "С аккаунтом", мы уже здесь, ничего не делаем.
     }
-    // ... методы для serverDropdown, если нужны ...
+    
+    private void SetUIInteractable(bool interactable)
+    {
+        if (statsButton != null) statsButton.interactable = interactable;
+        if (logoutButton != null) logoutButton.interactable = interactable;
+        if (playButton != null) playButton.interactable = interactable;
+        if (loginMethodDropdown != null) loginMethodDropdown.interactable = interactable;
+        if (serverDropdown != null) serverDropdown.interactable = interactable;
+        if (canvasGroup != null) canvasGroup.interactable = interactable;
+    }
+
+    // --- Логика для списка серверов (если нужна) ---
+    // private async void FetchAndDisplayServerList() { /* ... */ }
+    // private void UpdateServerDropdownDisplay() { /* ... */ }
+    // private string GetSelectedServerId() { /* ... */ }
+    // private void OnServerSelected(int index) { /* ... */ }
 }

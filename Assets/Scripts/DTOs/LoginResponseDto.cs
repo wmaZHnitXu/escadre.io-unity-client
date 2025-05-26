@@ -8,4 +8,6 @@ public class LoginResponseDto : TokenResponseDto
     public string AccessToken { get; set; }
     public System.DateTime AccessTokenExpiration { get; set; }
     public string RefreshToken { get; set; }
+    public string UserId { get; set; }
+    public string Nickname { get; set; }
 }
