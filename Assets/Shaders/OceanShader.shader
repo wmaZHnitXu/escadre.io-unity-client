@@ -2,28 +2,24 @@ Shader "Custom/LowPolyWater"
 {
 Properties
 {
-[Header(Water Colors)]
-_ShallowColor ("Shallow Color", Color) = (0.325, 0.807, 0.971, 0.725)
-_DeepColor ("Deep Color", Color) = (0.086, 0.407, 1, 0.749)
-_DepthMaxDistance ("Depth Maximum Distance", Float) = 1.0
+    [Header(Water Colors)]
+    _ShallowColor ("Shallow Color", Color) = (0.325, 0.807, 0.971, 0.725)
+    _DeepColor ("Deep Color", Color) = (0.086, 0.407, 1, 0.749)
+    _DepthMaxDistance ("Depth Maximum Distance", Float) = 1.0
 
-[Header(Shore Foam)]
+    [Header(Shore Foam)]
     _FoamColor ("Foam Color", Color) = (1, 1, 1, 1)
     _FoamDepthDistance ("Foam Depth Distance", Range(0, 5)) = 1.5
     _FoamNoiseScale ("Foam Noise Scale", Float) = 40
     _FoamNoiseThreshold ("Foam Noise Base Threshold", Range(0, 1)) = 0.6
     _FoamEdgeThreshold ("Foam Edge Threshold", Range(0, 1)) = 0.2
+    _FoamTransitionSmoothness ("Foam Transition Smoothness", Range(0.01, 0.5)) = 0.1
     
     [Header(Surface Foam)]
     _SurfaceFoamCutoff ("Surface Foam Cutoff", Range(0, 1)) = 0.8
     _SurfaceFoamAmount ("Surface Foam Amount", Range(0, 1)) = 0.3
     _SurfaceFoamScale ("Surface Foam Scale", Float) = 60
     _PeakFoamIntensity ("Wave Peak Foam Intensity", Range(0, 5)) = 1.0
-    
-    _OceanTex ("Ocean Displacement Texture", 3D) = "" {}
-    _GlobalTime ("Global Time", Float) = 0.0
-    _OceanSettingsParams ("Ocean Settings (Scale, TileSize, TimeDuration, TexRes)", Vector) = (1.0, 64.0, 10.0, 64.0)
-    _MaxByteToDispUnscaledConst ("Max Byte to Displacement Unscaled", Float) = 2.0
     
     [Header(Refraction)]
     _RefractionStrength ("Refraction Strength", Range(0, 1)) = 0.1
@@ -41,6 +37,12 @@ _DepthMaxDistance ("Depth Maximum Distance", Float) = 1.0
     _CloudSpeed ("Cloud Speed", Float) = 0.3
     _CloudStrength ("Cloud Strength", Range(0, 1)) = 0.5
     _CloudDistortion ("Cloud Distortion", Range(0, 10)) = 3.0
+    
+    [Header(Ocean Displacement)]
+    _OceanTex ("Ocean Displacement Texture", 3D) = "white" {}
+    _GlobalTime ("Global Time", Float) = 0.0
+    _OceanSettingsParams ("Ocean Settings (DisplacementScale, TileWorldSize, TimeLoopDuration, TextureResolutionXZ)", Vector) = (1, 64, 10, 64)
+    _MaxByteToDispUnscaledConst ("Max Byte To Displacement Unscaled Const", Float) = 2.0
 }
 
 SubShader
@@ -90,8 +92,8 @@ SubShader
             float4 screenPos    : TEXCOORD1;
             float3 positionWS   : TEXCOORD2;
             float3 viewDirWS    : TEXCOORD3;
-            float waveHeight    : TEXCOORD4; // Store wave height for foam on peaks
-            float2 noiseCoord   : TEXCOORD5; // Store noise coordinates for fragment shader
+            float waveHeight    : TEXCOORD4;
+            float2 noiseCoord   : TEXCOORD5;
         };
         
         CBUFFER_START(UnityPerMaterial)
@@ -104,17 +106,12 @@ SubShader
             float _FoamNoiseScale;
             float _FoamNoiseThreshold;
             float _FoamEdgeThreshold;
+            float _FoamTransitionSmoothness;
             
             float _SurfaceFoamCutoff;
             float _SurfaceFoamAmount;
             float _SurfaceFoamScale;
             float _PeakFoamIntensity;
-            
-            // Ocean Displacement Parameters
-            sampler3D _OceanTex;
-            float _GlobalTime;
-            float4 _OceanSettingsParams; // (DisplacementScale, TileWorldSize, TimeLoopDuration, TextureResolution)
-            float _MaxByteToDispUnscaledConst;
             
             float _RefractionStrength;
             
@@ -129,7 +126,15 @@ SubShader
             float _CloudSpeed;
             float _CloudStrength;
             float _CloudDistortion;
+            
+            // Ocean texture parameters
+            float _GlobalTime;
+            float4 _OceanSettingsParams; // (DisplacementScale, TileWorldSize, TimeLoopDuration, TextureResolutionXZ)
+            float _MaxByteToDispUnscaledConst;
         CBUFFER_END
+        
+        TEXTURE3D(_OceanTex);
+        SAMPLER(sampler_OceanTex);
         
         // Hash function for noise generation
         float2 hash(float2 p)
@@ -176,8 +181,8 @@ SubShader
             return value;
         }
         
-        // Sample ocean displacement from 3D texture
-        float3 SampleOceanDisplacement(float3 worldPos)
+        // Function to sample ocean displacement from texture
+        float3 SampleOceanDisplacement(float2 worldPos)
         {
             float displacementScale = _OceanSettingsParams.x;
             float tileWorldSize = _OceanSettingsParams.y;
@@ -185,40 +190,42 @@ SubShader
             float textureResolution = _OceanSettingsParams.w;
             
             // Calculate texture coordinates
-            float2 spatialUV = worldPos.xz / tileWorldSize;
-            float timeUV = fmod(_GlobalTime / timeLoopDuration, 1.0);
+            float2 texCoordXZ = worldPos / tileWorldSize;
+            float texCoordTime = fmod(_GlobalTime, timeLoopDuration) / timeLoopDuration;
             
-            // Sample the 3D displacement texture
-            float3 texelSample = tex3Dlod(_OceanTex, float4(spatialUV, timeUV, 0)).xyz;
+            // Wrap texture coordinates
+            texCoordXZ = frac(texCoordXZ);
             
-            // Convert from [0,1] range to displacement values
-            // Assuming the texture stores values in [0,1] representing byte values [0,255]
-            float3 displacement = (texelSample * 255.0 - 128.0) / 127.0 * _MaxByteToDispUnscaledConst;
+            // Sample the 3D texture
+            float3 textureCoords = float3(texCoordXZ, texCoordTime);
+            float4 sampledColor = SAMPLE_TEXTURE3D_LOD(_OceanTex, sampler_OceanTex, textureCoords, 0);
+            
+            // Convert from [0,1] to displacement values
+            float3 displacement = (sampledColor.rgb - 0.5) * 2.0 * _MaxByteToDispUnscaledConst;
+            
+            // Apply displacement scale
             displacement *= displacementScale;
             
             return displacement;
         }
         
-        // Calculate normal from displacement by sampling neighboring points
-        float3 CalculateOceanNormal(float3 worldPos)
+        // Calculate partial derivatives for normal calculation
+        float3 CalculateNormal(float2 worldPos)
         {
-            float epsilon = 0.1; // Small offset for finite difference
+            float epsilon = 0.1; // Small offset for derivative calculation
             
+            // Sample neighboring points
             float3 center = SampleOceanDisplacement(worldPos);
-            float3 right = SampleOceanDisplacement(worldPos + float3(epsilon, 0, 0));
-            float3 forward = SampleOceanDisplacement(worldPos + float3(0, 0, epsilon));
+            float3 right = SampleOceanDisplacement(worldPos + float2(epsilon, 0));
+            float3 forward = SampleOceanDisplacement(worldPos + float2(0, epsilon));
             
-            // Calculate displaced positions
-            float3 p1 = worldPos + center;
-            float3 p2 = (worldPos + float3(epsilon, 0, 0)) + right;
-            float3 p3 = (worldPos + float3(0, 0, epsilon)) + forward;
+            // Calculate tangent vectors
+            float3 tangentX = float3(epsilon, right.y - center.y, right.z - center.z);
+            float3 tangentZ = float3(forward.x - center.x, forward.y - center.y, epsilon);
             
-            // Calculate vectors and cross product for normal
-            float3 v1 = p2 - p1;
-            float3 v2 = p3 - p1;
-            float3 normal = normalize(cross(v1, v2));
-            
-            return normal;
+            // Calculate normal using cross product
+            float3 normal = cross(tangentZ, tangentX);
+            return normalize(normal);
         }
         
         Varyings vert(Attributes IN)
@@ -229,20 +236,20 @@ SubShader
             float3 worldPos = TransformObjectToWorld(IN.positionOS.xyz);
             float3 originalWorldPos = worldPos;
             
-            // Sample ocean displacement from 3D texture
-            float3 displacement = SampleOceanDisplacement(originalWorldPos);
+            // Sample ocean displacement
+            float3 displacement = SampleOceanDisplacement(worldPos.xz);
             
-            // Apply displacement to world position
+            // Apply displacement
             worldPos += displacement;
             
-            // Calculate normal from displacement
-            float3 normal = CalculateOceanNormal(originalWorldPos);
+            // Calculate normal from ocean texture
+            float3 normal = CalculateNormal(originalWorldPos.xz);
             
-            // Calculate wave height normalized for foam (using Y displacement)
-            float waveHeight = displacement.y;
+            // Calculate wave height for foam (using Y displacement)
+            float waveHeight = saturate(displacement.y * 0.5 + 0.5); // Normalize to [0,1]
             
-            // Create noise coordinates for fragment shader effects
-            float2 noiseCoord = originalWorldPos.xz * 0.01; // Scale for noise sampling
+            // Create noise coordinates for fragment shader
+            float2 noiseCoord = originalWorldPos.xz * 0.1;
             
             // Set output struct values
             OUT.positionWS = worldPos;
@@ -251,7 +258,7 @@ SubShader
             OUT.uv = IN.uv;
             OUT.screenPos = ComputeScreenPos(OUT.positionHCS);
             OUT.viewDirWS = GetWorldSpaceViewDir(worldPos);
-            OUT.waveHeight = saturate(waveHeight * 0.5 + 0.5); // Normalize for foam calculation
+            OUT.waveHeight = waveHeight;
             OUT.noiseCoord = noiseCoord;
             
             return OUT;
@@ -301,9 +308,9 @@ SubShader
             float depthRatio = saturate(depthDifference / _FoamDepthDistance);
             float threshold = lerp(_FoamEdgeThreshold, _FoamNoiseThreshold, depthRatio);
             
-            // Apply the threshold dynamically based on depth
-            float shoreFoam = (foamNoise > threshold) ? 1.0 : 0.0;
-            shoreFoam *= (1.0 - depthRatio);
+            // Apply the threshold dynamically based on depth - SMOOTH TRANSITION
+            float shoreFoam = smoothstep(threshold - _FoamTransitionSmoothness, threshold + _FoamTransitionSmoothness, foamNoise);
+            shoreFoam *= (1.0 - depthRatio); // Fade foam intensity with depth
             
             // Generate surface foam across the entire water surface
             float2 surfaceFoamUV = IN.positionWS.xz * _SurfaceFoamScale * 0.01;
@@ -375,8 +382,6 @@ SubShader
                 Light light = GetAdditionalLight(i, IN.positionWS, 1.0);
                 float intensity = saturate(dot(flatNormal, light.direction));
                 additionalLighting += light.color * intensity * light.distanceAttenuation * light.shadowAttenuation;
-                
-                // Add specular from additional lights
                 additionalLighting += CalculateSpecular(flatNormal, viewDirWS, light.direction, 
                                                      light.color * light.distanceAttenuation * light.shadowAttenuation, _Smoothness);
             }
@@ -408,7 +413,7 @@ SubShader
         ENDHLSL
     }
     
-    // Shadow caster pass
+    // Shadow caster pass - modified to use ocean texture displacement
     Pass
     {
         Name "ShadowCaster"
@@ -427,27 +432,51 @@ SubShader
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
         float3 _LightDirection;
-        sampler3D _OceanTex;
         float _GlobalTime;
         float4 _OceanSettingsParams;
         float _MaxByteToDispUnscaledConst;
-
-        // Sample ocean displacement for shadow pass
-        float3 SampleOceanDisplacementShadow(float3 worldPos)
+        
+        TEXTURE3D(_OceanTex);
+        SAMPLER(sampler_OceanTex);
+        
+        // Function to sample ocean displacement from texture
+        float3 SampleOceanDisplacementShadow(float2 worldPos)
         {
             float displacementScale = _OceanSettingsParams.x;
             float tileWorldSize = _OceanSettingsParams.y;
             float timeLoopDuration = _OceanSettingsParams.z;
+            float textureResolution = _OceanSettingsParams.w;
             
-            float2 spatialUV = worldPos.xz / tileWorldSize;
-            float timeUV = fmod(_GlobalTime / timeLoopDuration, 1.0);
+            // Calculate texture coordinates
+            float2 texCoordXZ = worldPos / tileWorldSize;
+            float texCoordTime = fmod(_GlobalTime, timeLoopDuration) / timeLoopDuration;
             
-            float3 texelSample = tex3Dlod(_OceanTex, float4(spatialUV, timeUV, 0)).xyz;
-            float3 displacement = (texelSample * 255.0 - 128.0) / 127.0 * _MaxByteToDispUnscaledConst;
+            // Wrap texture coordinates
+            texCoordXZ = frac(texCoordXZ);
+            
+            // Sample the 3D texture
+            float3 textureCoords = float3(texCoordXZ, texCoordTime);
+            float4 sampledColor = SAMPLE_TEXTURE3D_LOD(_OceanTex, sampler_OceanTex, textureCoords, 0);
+            
+            // Convert from [0,1] to displacement values
+            float3 displacement = (sampledColor.rgb - 0.5) * 2.0 * _MaxByteToDispUnscaledConst;
+            
+            // Apply displacement scale
             displacement *= displacementScale;
             
             return displacement;
         }
+        
+        struct Attributes
+        {
+            float4 positionOS   : POSITION;
+            float3 normalOS     : NORMAL;
+        };
+
+        struct Varyings
+        {
+            float4 positionCS   : SV_POSITION;
+        };
 
         float4 GetShadowPositionHClip(float3 positionWS, float3 normalWS)
         {
@@ -457,6 +486,7 @@ SubShader
             float extraNormalBias = 0.5;
             
             positionWS_biased += _LightDirection * extraDepthBias;
+            
             float3 normalBias = normalWS * extraNormalBias;
             positionWS_biased += normalBias;
             
@@ -471,23 +501,14 @@ SubShader
             return positionCS;
         }
 
-        struct Attributes
-        {
-            float4 positionOS   : POSITION;
-            float3 normalOS     : NORMAL;
-        };
-
-        struct Varyings
-        {
-            float4 positionCS   : SV_POSITION;
-        };
-
         Varyings ShadowPassVertex(Attributes input)
         {
             Varyings output;
             
             float3 worldPos = TransformObjectToWorld(input.positionOS.xyz);
-            float3 displacement = SampleOceanDisplacementShadow(worldPos);
+            
+            // Sample ocean displacement
+            float3 displacement = SampleOceanDisplacementShadow(worldPos.xz);
             worldPos += displacement;
             
             float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
@@ -503,7 +524,7 @@ SubShader
         ENDHLSL
     }
 
-    // Depth prepass
+    // Depth prepass for drawing the water surface to the depth buffer
     Pass
     {
         Name "DepthOnly"
@@ -518,22 +539,36 @@ SubShader
 
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
-        sampler3D _OceanTex;
         float _GlobalTime;
         float4 _OceanSettingsParams;
         float _MaxByteToDispUnscaledConst;
-
-        float3 SampleOceanDisplacementDepth(float3 worldPos)
+        
+        TEXTURE3D(_OceanTex);
+        SAMPLER(sampler_OceanTex);
+        
+        // Function to sample ocean displacement from texture
+        float3 SampleOceanDisplacementDepth(float2 worldPos)
         {
             float displacementScale = _OceanSettingsParams.x;
             float tileWorldSize = _OceanSettingsParams.y;
             float timeLoopDuration = _OceanSettingsParams.z;
+            float textureResolution = _OceanSettingsParams.w;
             
-            float2 spatialUV = worldPos.xz / tileWorldSize;
-            float timeUV = fmod(_GlobalTime / timeLoopDuration, 1.0);
+            // Calculate texture coordinates
+            float2 texCoordXZ = worldPos / tileWorldSize;
+            float texCoordTime = fmod(_GlobalTime, timeLoopDuration) / timeLoopDuration;
             
-            float3 texelSample = tex3Dlod(_OceanTex, float4(spatialUV, timeUV, 0)).xyz;
-            float3 displacement = (texelSample * 255.0 - 128.0) / 127.0 * _MaxByteToDispUnscaledConst;
+            // Wrap texture coordinates
+            texCoordXZ = frac(texCoordXZ);
+            
+            // Sample the 3D texture
+            float3 textureCoords = float3(texCoordXZ, texCoordTime);
+            float4 sampledColor = SAMPLE_TEXTURE3D_LOD(_OceanTex, sampler_OceanTex, textureCoords, 0);
+            
+            // Convert from [0,1] to displacement values
+            float3 displacement = (sampledColor.rgb - 0.5) * 2.0 * _MaxByteToDispUnscaledConst;
+            
+            // Apply displacement scale
             displacement *= displacementScale;
             
             return displacement;
@@ -555,7 +590,9 @@ SubShader
             Varyings output = (Varyings)0;
             
             float3 worldPos = TransformObjectToWorld(input.position.xyz);
-            float3 displacement = SampleOceanDisplacementDepth(worldPos);
+            
+            // Sample ocean displacement
+            float3 displacement = SampleOceanDisplacementDepth(worldPos.xz);
             worldPos += displacement;
             
             output.positionCS = TransformWorldToHClip(worldPos);

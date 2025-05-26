@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: LegacyOcean
-  m_Shader: {fileID: 4800000, guid: 06bc04ac878996541bef2d36fd652d2d, type: 3}
+  m_Shader: {fileID: 4800000, guid: 2f9cedcfbb599ad488e854ec77fabad4, type: 3}
   m_ValidKeywords: []
   m_InvalidKeywords: []
   m_LightmapFlags: 4
@@ -93,23 +93,25 @@ Material:
     - _CloudStrength: 0.7
     - _Cull: 2
     - _Cutoff: 0.5
-    - _DepthMaxDistance: 1.95
+    - _DepthMaxDistance: 8.67
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1
     - _DstBlend: 0
     - _EnvironmentReflections: 1
     - _FoamDepthDistance: 5
     - _FoamEdgeThreshold: 0.38
-    - _FoamNoiseScale: 40
+    - _FoamNoiseScale: 36.33
     - _FoamNoiseThreshold: 0.81
     - _FresnelIntensity: 0.3
     - _FresnelPower: 5
-    - _GlobalTime: 114.89624
+    - _GlobalTime: 2.4643602
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
     - _MaxByteToDispUnscaledConst: 2
+    - _MaxWaveHeight: 1
     - _Metallic: 0
+    - _MinWaveHeight: 0.1
     - _OcclusionStrength: 1
     - _Parallax: 0.005
     - _PeakFoamIntensity: 1.82
@@ -117,7 +119,7 @@ Material:
     - _ReceiveShadows: 1
     - _RefractionStrength: 0.1
     - _ShadowStrength: 1
-    - _Smoothness: 0.5
+    - _Smoothness: 0.47
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SpecularIntensity: 0.5
@@ -125,7 +127,12 @@ Material:
     - _Surface: 0
     - _SurfaceFoamAmount: 0.94
     - _SurfaceFoamCutoff: 0.53
-    - _SurfaceFoamScale: 55.52
+    - _SurfaceFoamScale: 0.43
+    - _WaveNoiseScale: 1
+    - _WaveNoiseSpeed: 0.5
+    - _WaveNoiseStrength: 0.13
+    - _WaveSpeed: 0.5
+    - _WaveStrength: 0.2
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
@@ -138,6 +145,10 @@ Material:
     - _OceanSettingsParams: {r: 3, g: 128, b: 20, a: 64}
     - _ShallowColor: {r: 0.61960787, g: 0.8392157, b: 0.80784315, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
+    - _WaveA: {r: 0.5, g: 8, b: 0, a: 0}
+    - _WaveB: {r: 0.25, g: 4, b: 0, a: 0}
+    - _WaveC: {r: 0.15, g: 2, b: 0, a: 0}
+    - _WaveDirection: {r: 1, g: 0, b: 1, a: 0}
   m_BuildTextureStacks: []
 --- !u!114 &4868931816493895250
 MonoBehaviour:
