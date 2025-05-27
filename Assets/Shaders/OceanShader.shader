@@ -13,13 +13,14 @@ Properties
     _FoamNoiseScale ("Foam Noise Scale", Float) = 40
     _FoamNoiseThreshold ("Foam Noise Base Threshold", Range(0, 1)) = 0.6
     _FoamEdgeThreshold ("Foam Edge Threshold", Range(0, 1)) = 0.2
-    _FoamTransitionSmoothness ("Foam Transition Smoothness", Range(0.01, 0.5)) = 0.1
+    _FoamAnimSpeed ("Foam Animation Speed", Float) = 1.0
     
     [Header(Surface Foam)]
     _SurfaceFoamCutoff ("Surface Foam Cutoff", Range(0, 1)) = 0.8
     _SurfaceFoamAmount ("Surface Foam Amount", Range(0, 1)) = 0.3
     _SurfaceFoamScale ("Surface Foam Scale", Float) = 60
     _PeakFoamIntensity ("Wave Peak Foam Intensity", Range(0, 5)) = 1.0
+    _SurfaceFoamAnimSpeed ("Surface Foam Animation Speed", Float) = 1.0
     
     [Header(Refraction)]
     _RefractionStrength ("Refraction Strength", Range(0, 1)) = 0.1
@@ -43,6 +44,12 @@ Properties
     _GlobalTime ("Global Time", Float) = 0.0
     _OceanSettingsParams ("Ocean Settings (DisplacementScale, TileWorldSize, TimeLoopDuration, TextureResolutionXZ)", Vector) = (1, 64, 10, 64)
     _MaxByteToDispUnscaledConst ("Max Byte To Displacement Unscaled Const", Float) = 2.0
+    
+    [Header(Noise Textures)]
+    _FoamNoiseTex ("Foam Noise Texture", 2D) = "white" {}
+    _SurfaceFoamNoiseTex ("Surface Foam Noise Texture", 2D) = "white" {}
+    _CloudNoiseTex ("Cloud Noise Texture", 2D) = "white" {}
+    _PeakFoamNoiseTex ("Peak Foam Noise Texture", 2D) = "white" {}
 }
 
 SubShader
@@ -106,12 +113,13 @@ SubShader
             float _FoamNoiseScale;
             float _FoamNoiseThreshold;
             float _FoamEdgeThreshold;
-            float _FoamTransitionSmoothness;
+            float _FoamAnimSpeed;
             
             float _SurfaceFoamCutoff;
             float _SurfaceFoamAmount;
             float _SurfaceFoamScale;
             float _PeakFoamIntensity;
+            float _SurfaceFoamAnimSpeed;
             
             float _RefractionStrength;
             
@@ -136,50 +144,17 @@ SubShader
         TEXTURE3D(_OceanTex);
         SAMPLER(sampler_OceanTex);
         
-        // Hash function for noise generation
-        float2 hash(float2 p)
-        {
-            p = float2(dot(p, float2(127.1, 311.7)),
-                      dot(p, float2(269.5, 183.3)));
-            return -1.0 + 2.0 * frac(sin(p) * 43758.5453123);
-        }
+        TEXTURE2D(_FoamNoiseTex);
+        SAMPLER(sampler_FoamNoiseTex);
         
-        // Perlin noise function
-        float perlin2D(float2 p)
-        {
-            float2 i = floor(p);
-            float2 f = frac(p);
-            
-            float2 u = f * f * (3.0 - 2.0 * f);
-            
-            float2 a = hash(i + float2(0.0, 0.0));
-            float2 b = hash(i + float2(1.0, 0.0));
-            float2 c = hash(i + float2(0.0, 1.0));
-            float2 d = hash(i + float2(1.0, 1.0));
-            
-            float noiseVal = lerp(lerp(dot(a, f - float2(0.0, 0.0)),
-                                      dot(b, f - float2(1.0, 0.0)), u.x),
-                                 lerp(dot(c, f - float2(0.0, 1.0)),
-                                      dot(d, f - float2(1.0, 1.0)), u.x), u.y);
-            return 0.5 + 0.5 * noiseVal;
-        }
+        TEXTURE2D(_SurfaceFoamNoiseTex);
+        SAMPLER(sampler_SurfaceFoamNoiseTex);
         
-        // FBM (Fractal Brownian Motion) noise
-        float fbm(float2 p, int octaves)
-        {
-            float value = 0.0;
-            float amplitude = 0.5;
-            float frequency = 1.0;
-            
-            for (int i = 0; i < octaves; i++)
-            {
-                value += amplitude * perlin2D(p * frequency);
-                amplitude *= 0.5;
-                frequency *= 2.0;
-            }
-            
-            return value;
-        }
+        TEXTURE2D(_CloudNoiseTex);
+        SAMPLER(sampler_CloudNoiseTex);
+        
+        TEXTURE2D(_PeakFoamNoiseTex);
+        SAMPLER(sampler_PeakFoamNoiseTex);
         
         // Function to sample ocean displacement from texture
         float3 SampleOceanDisplacement(float2 worldPos)
@@ -298,24 +273,30 @@ SubShader
             // Time variables for animations
             float time = _GlobalTime;
             
-            // Generate animated perlin noise for shore foam
+            // Generate animated foam using precomputed noise texture
             float2 foamUV = IN.positionWS.xz * _FoamNoiseScale * 0.01;
-            float noise1 = perlin2D(foamUV + float2(time * 0.17, time * 0.23));
-            float noise2 = perlin2D(foamUV * 1.4 - float2(time * 0.13, time * 0.19));
+            float2 foamAnimOffset1 = float2(time * 0.17, time * 0.23) * _FoamAnimSpeed;
+            float2 foamAnimOffset2 = float2(-time * 0.13, -time * 0.19) * _FoamAnimSpeed;
+            
+            float noise1 = SAMPLE_TEXTURE2D(_FoamNoiseTex, sampler_FoamNoiseTex, foamUV + foamAnimOffset1).r;
+            float noise2 = SAMPLE_TEXTURE2D(_FoamNoiseTex, sampler_FoamNoiseTex, foamUV * 1.4 + foamAnimOffset2).r;
             float foamNoise = (noise1 * 0.7 + noise2 * 0.3);
             
             // Calculate depth-based threshold for shore foam
             float depthRatio = saturate(depthDifference / _FoamDepthDistance);
             float threshold = lerp(_FoamEdgeThreshold, _FoamNoiseThreshold, depthRatio);
             
-            // Apply the threshold dynamically based on depth - SMOOTH TRANSITION
-            float shoreFoam = smoothstep(threshold - _FoamTransitionSmoothness, threshold + _FoamTransitionSmoothness, foamNoise);
-            shoreFoam *= (1.0 - depthRatio); // Fade foam intensity with depth
+            // Apply the threshold dynamically based on depth
+            float shoreFoam = (foamNoise > threshold) ? 1.0 : 0.0;
+            shoreFoam *= (1.0 - depthRatio);
             
-            // Generate surface foam across the entire water surface
+            // Generate surface foam using precomputed noise texture
             float2 surfaceFoamUV = IN.positionWS.xz * _SurfaceFoamScale * 0.01;
-            float surfaceNoise1 = perlin2D(surfaceFoamUV + float2(time * 0.05, time * 0.1));
-            float surfaceNoise2 = perlin2D(surfaceFoamUV * 2.3 - float2(time * 0.06, time * 0.08));
+            float2 surfaceAnimOffset1 = float2(time * 0.05, time * 0.1) * _SurfaceFoamAnimSpeed;
+            float2 surfaceAnimOffset2 = float2(-time * 0.06, -time * 0.08) * _SurfaceFoamAnimSpeed;
+            
+            float surfaceNoise1 = SAMPLE_TEXTURE2D(_SurfaceFoamNoiseTex, sampler_SurfaceFoamNoiseTex, surfaceFoamUV + surfaceAnimOffset1).r;
+            float surfaceNoise2 = SAMPLE_TEXTURE2D(_SurfaceFoamNoiseTex, sampler_SurfaceFoamNoiseTex, surfaceFoamUV * 2.3 + surfaceAnimOffset2).r;
             float surfaceFoamNoise = (surfaceNoise1 * surfaceNoise2);
             
             // Add more foam on wave peaks based on vertex wave height
@@ -323,9 +304,10 @@ SubShader
             float foamThreshold = lerp(_SurfaceFoamCutoff, _SurfaceFoamCutoff - 0.2, peakFoam);
             float surfaceFoam = smoothstep(foamThreshold, foamThreshold + 0.05, surfaceFoamNoise) * _SurfaceFoamAmount;
             
-            // Add extra foam patches on high waves
+            // Add extra foam patches on high waves using precomputed noise
             if (IN.waveHeight > 0.7) {
-                float peakNoiseVar = perlin2D(IN.noiseCoord * 3.7 + time * 0.3) * 0.5;
+                float2 peakFoamUV = IN.noiseCoord * 3.7 + time * 0.3 * _SurfaceFoamAnimSpeed;
+                float peakNoiseVar = SAMPLE_TEXTURE2D(_PeakFoamNoiseTex, sampler_PeakFoamNoiseTex, peakFoamUV).r * 0.5;
                 surfaceFoam += (IN.waveHeight * 0.3 + peakNoiseVar) * _SurfaceFoamAmount;
             }
             
@@ -335,17 +317,23 @@ SubShader
             // Low poly effect by using flat shading from normals
             float3 flatNormal = normalize(cross(ddy(IN.positionWS), ddx(IN.positionWS))); 
             
-            // Generate cloud shadows using FBM noise
+            // Generate cloud shadows using precomputed noise texture
             float cloudTime = time * _CloudSpeed;
             
             // Create distorted UVs for more interesting cloud patterns
             float2 cloudUV = IN.positionWS.xz * _CloudScale * 0.01;
-            float distortion = fbm(cloudUV * _CloudDistortion + cloudTime * 0.1, 2) * 0.2;
+            
+            // Sample distortion from noise texture
+            float2 distortionUV = cloudUV * _CloudDistortion + cloudTime * 0.1;
+            float distortion = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, distortionUV).r * 0.2;
             cloudUV += distortion;
             
-            // Generate layered cloud shadows
-            float cloudShadow1 = fbm(cloudUV + float2(cloudTime * 0.04, cloudTime * 0.05), 4);
-            float cloudShadow2 = fbm(cloudUV * 1.5 - float2(cloudTime * 0.03, cloudTime * 0.02), 3);
+            // Generate layered cloud shadows using texture samples
+            float2 cloudAnimOffset1 = float2(cloudTime * 0.04, cloudTime * 0.05);
+            float2 cloudAnimOffset2 = float2(-cloudTime * 0.03, -cloudTime * 0.02);
+            
+            float cloudShadow1 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, cloudUV + cloudAnimOffset1).g;
+            float cloudShadow2 = SAMPLE_TEXTURE2D(_CloudNoiseTex, sampler_CloudNoiseTex, cloudUV * 1.5 + cloudAnimOffset2).b;
             
             // Combine cloud layers and adjust contrast
             float cloudShadow = (cloudShadow1 * 0.7 + cloudShadow2 * 0.3);
