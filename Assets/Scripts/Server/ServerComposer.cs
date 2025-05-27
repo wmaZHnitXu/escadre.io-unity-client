@@ -212,14 +212,7 @@ public class ServerComposer : MonoBehaviour
     public void CreateDebugEntityFar() { CreateDebugEntityAt(new Core.Primitives.Vector3(100f, 0f, 100f)); }
 
     private void CreateDebugEntityAt(Core.Primitives.Vector3 position) {
-        if (_coreComposer?.ServerLevel != null) {
-            Logger.Log($"[ServerComposer MB Action] Requesting DebugEntity creation at {position}...");
-            lastCreatedDebugEntity = new Core.Model.DebugEntity(_coreComposer.ServerLevel); 
-            lastCreatedDebugEntity.Position = position; 
-            lastCreatedDebugEntity.FloatingBehavior = new DefaultFloatingBehavior(buoyancyFactor: 0.5f, verticalInterpolationSpeed: 1f);
-        } else {
-            Logger.LogWarning("[ServerComposer MB Action] CoreComposer or Level not initialized!");
-        }
+        
     }
 
     [ContextMenu("2. Simulate Client Sync (Correct Checksum - needs Client running)")]
