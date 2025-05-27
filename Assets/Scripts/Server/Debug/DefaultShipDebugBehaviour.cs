@@ -10,9 +10,10 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
     [SerializeField, ReadOnly] protected float currentSpeed;
     [SerializeField, ReadOnly] protected float maxSpeed; 
     [SerializeField, ReadOnly] protected float turnRate;
-    [SerializeField, ReadOnly] protected int owningEscadreClientId_Display; // Renamed for clarity
+    [SerializeField, ReadOnly] protected int owningEscadreClientId_Display; 
     [SerializeField, ReadOnly] protected int owningEscadreEntityId_Display = -1;
     [SerializeField, ReadOnly] protected int cannonCount_Display = 0;
+    [SerializeField, ReadOnly] protected float collectableDetectionRange_Display; // Added
 
 
     protected DefaultShip TargetDefaultShip => _targetEntity as DefaultShip;
@@ -35,14 +36,16 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
             maxSpeed = TargetDefaultShip.MaxSpeed; 
             turnRate = TargetDefaultShip.TurnRate;
             owningEscadreClientId_Display = TargetDefaultShip.OwningEscadreClientId;
-            owningEscadreEntityId_Display = TargetDefaultShip.OwningEscadre?.Id ?? -1; // OwningEscadre is the Escadre entity
+            owningEscadreEntityId_Display = TargetDefaultShip.OwningEscadre?.Id ?? -1; 
             cannonCount_Display = TargetDefaultShip.Cannons?.Count ?? 0;
+            collectableDetectionRange_Display = TargetDefaultShip.CollectableDetectionRange; // Added
         } else { 
             currentSpeed = 0; 
             maxSpeed = 0; turnRate = 0; 
             owningEscadreClientId_Display = -1;
             owningEscadreEntityId_Display = -1;
             cannonCount_Display = 0;
+            collectableDetectionRange_Display = 0; // Added
         }
     }
 
@@ -83,22 +86,14 @@ public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
         if (TargetDefaultShip != null && !TargetDefaultShip.IsDead) {
             Gizmos.color = Color.blue; 
             Gizmos.DrawLine(transform.position, transform.position + transform.forward * 3f); 
-        }
-    }
 
-    private static void DrawWireDisk(UnityEngine.Vector3 position, float radius, Color color, int segments = 32) 
-    {
-        if (radius <= 0 || segments <= 2) return; 
-        Color oldColor = Gizmos.color; 
-        Gizmos.color = color;
-        float angleStep = 360.0f / segments;
-        UnityEngine.Vector3 prevPoint = position + UnityEngine.Quaternion.Euler(0, 0, 0) * UnityEngine.Vector3.forward * radius;
-        for (int i = 1; i <= segments; i++) { 
-            float angle = i * angleStep; 
-            UnityEngine.Vector3 nextPoint = position + UnityEngine.Quaternion.Euler(0, angle, 0) * UnityEngine.Vector3.forward * radius; 
-            Gizmos.DrawLine(prevPoint, nextPoint); 
-            prevPoint = nextPoint; 
+            // Draw Collectable Detection Range
+            Color detectionRangeColor = new Color(0.8f, 0.5f, 0.2f, 0.1f); // Orange, semi-transparent
+            Gizmos.color = detectionRangeColor;
+            Gizmos.DrawSphere(TargetDefaultShip.Position.ToUnityVector(), TargetDefaultShip.CollectableDetectionRange);
+            
+            Gizmos.color = new Color(0.8f, 0.5f, 0.2f, 0.6f); // Brighter wire for detection range
+            Gizmos.DrawWireSphere(TargetDefaultShip.Position.ToUnityVector(), TargetDefaultShip.CollectableDetectionRange);
         }
-        Gizmos.color = oldColor;
     }
 }

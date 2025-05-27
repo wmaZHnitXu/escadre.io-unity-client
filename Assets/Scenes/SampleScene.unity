@@ -200,7 +200,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   m_LocalRotation: {x: 0.33141348, y: 0.4619398, z: -0.19134167, w: 0.8001032}
-  m_LocalPosition: {x: -329.4, y: 321, z: -321.4}
+  m_LocalPosition: {x: -106, y: 117, z: -93}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -452,8 +452,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   oceanTextureBytesFile: {fileID: 4900000, guid: 105be25d5cbb1da42beaf26791d31a18,
     type: 3}
-  displacementScale: 4
-  textureTileWorldSize: 512
+  displacementScale: 1
+  textureTileWorldSize: 128
   textureTimeLoopDuration: 20
   textureResolutionXZ: 64
   textureResolutionTime: 64
@@ -484,7 +484,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0485b8fdc1e16b641bc05e7ecda30a72, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  oceanPlaneSize: 1000
+  oceanPlaneSize: 200
   oceanPlaneSegments: 100
 --- !u!23 &544807145
 MeshRenderer:
@@ -579,6 +579,9 @@ MonoBehaviour:
       type: 3}
   - EntityType: 3
     DebugPrefab: {fileID: 4379563721390693257, guid: 6eeb09fe5225b9d44a732484ae935860,
+      type: 3}
+  - EntityType: 4
+    DebugPrefab: {fileID: 5066656195200630647, guid: 09520f4879fa2aa40a339adc3712d12a,
       type: 3}
   debugObjectParent: {fileID: 0}
 --- !u!114 &709566213
