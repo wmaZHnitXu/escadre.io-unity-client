@@ -17202,7 +17202,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 34d18947b34560e4584d9df950c52743, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  MasterServerUrl: http://localhost:5076
+  SimulateLoginError: 0
+  SimulateRegistrationError: 0
+  SimulateRegistrationRequiresEmailConfirmation: 0
+  SimulateAnonymousLoginError: 0
+  SimulateRefreshTokenError: 0
+  SimulateRequestPasswordResetAccountNotFound: 0
+  SimulateResetPasswordError: 0
+  SimulateGetServerListError: 0
 --- !u!1 &1446813027
 GameObject:
   m_ObjectHideFlags: 0

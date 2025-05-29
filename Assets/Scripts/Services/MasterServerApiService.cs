@@ -2,21 +2,16 @@
 using UnityEngine;
 using System;
 using System.Threading.Tasks;
-using System.Collections.Generic; // Для List
+using System.Collections.Generic;
 
 public class MasterServerApiService : MonoBehaviour
 {
     public static MasterServerApiService Instance { get; private set; }
 
-    // Флаги для имитации различных состояний сервера или ошибок
-    public bool SimulateLoginError = false;
-    public bool SimulateRegistrationError = false;
-    public bool SimulateRegistrationRequiresEmailConfirmation = true; // По умолчанию имитируем, что нужна активация
-    public bool SimulateAnonymousLoginError = false;
-    public bool SimulateRefreshTokenError = false;
-    public bool SimulateRequestPasswordResetAccountNotFound = false;
-    public bool SimulateResetPasswordError = false;
-    public bool SimulateGetServerListError = false; // Для методов, требующих авторизации
+    private MasterServerConnection connection;
+    public string MasterServerUrl = "http://localhost:5076/masterhub"; // Укажите ваш URL
+
+    private bool isRefreshingToken = false; // Флаг, чтобы избежать одновременных запросов на обновление токена
 
     private void Awake()
     {
@@ -24,6 +19,8 @@ public class MasterServerApiService : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            connection = new MasterServerConnection();
+            connection.OnConnectionError += HandleConnectionError;
         }
         else
         {
@@ -31,201 +28,408 @@ public class MasterServerApiService : MonoBehaviour
         }
     }
 
-    // Имитация задержки сети
-    private async Task SimulateNetworkDelay(int milliseconds = 500)
+    private async void Start()
     {
-        await Task.Delay(milliseconds);
+        /* При старте приложения пытаемся восстановить сессию, если есть RefreshToken
+        if (SessionManager.Instance != null && !string.IsNullOrEmpty(SessionManager.Instance.RefreshToken))
+        {
+            Debug.Log("Found stored refresh token. Attempting to refresh session on start...");
+            await TryRefreshTokenAsync(); // Это также вызовет EnsureConnectedAsync с новым токеном, если успешно
+        }
+        else
+        {
+            await EnsureConnectedAsync(); // Обычное подключение без токена
+        }*/
+        Debug.LogWarning("[MasterServerApiService.Start] Automatic connection on start is TEMPORARILY DISABLED for debugging.");
+    }
+/*
+    private async Task EnsureConnectedAsync(string accessTokenToUse = null, bool forceDisconnect = false)
+    {
+        string tokenForConnection = accessTokenToUse ?? SessionManager.Instance?.AccessToken;
+
+        if (connection.IsConnected)
+        {
+            if (forceDisconnect || (SessionManager.Instance != null && tokenForConnection != SessionManager.Instance.AccessToken && !string.IsNullOrEmpty(SessionManager.Instance.AccessToken))) // Если токен изменился (например, после логина/логаута)
+            {
+                Debug.Log("Token state changed or forced disconnect. Reconnecting...");
+                await connection.DisconnectAsync();
+            }
+            else if (!forceDisconnect) // Если уже подключены и токен не менялся, и не было форс-дисконнекта
+            {
+                return;
+            }
+        }
+        
+        // Если после возможных дисконнектов мы всё еще не подключены или был форс-дисконнект
+        if (!connection.IsConnected || forceDisconnect) {
+            string urlToConnect = MasterServerUrl;
+            if (!string.IsNullOrEmpty(tokenForConnection))
+            {
+                char separator = urlToConnect.Contains("?") ? '&' : '?';
+                urlToConnect += $"{separator}access_token={Uri.EscapeDataString(tokenForConnection)}";
+            }
+            
+            Debug.Log($"Attempting to connect to: {urlToConnect}");
+            await connection.ConnectAsync(urlToConnect);
+        }
+        if (!connection.IsConnected || forceDisconnect) {
+            string urlToConnect = MasterServerUrl;
+            // Добавим больше логов здесь, чтобы понять, что происходит с tokenForConnection
+            Debug.Log($"[EnsureConnectedAsync] Initial MasterServerUrl: '{MasterServerUrl}'");
+            Debug.Log($"[EnsureConnectedAsync] accessTokenToUse: '{(accessTokenToUse == null ? "NULL" : accessTokenToUse)}'");
+            Debug.Log($"[EnsureConnectedAsync] SessionManager.Instance.AccessToken: '{(SessionManager.Instance?.AccessToken == null ? "NULL" : SessionManager.Instance.AccessToken)}'");
+            Debug.Log($"[EnsureConnectedAsync] tokenForConnection (before IsNullOrEmpty check): '{(tokenForConnection == null ? "NULL" : tokenForConnection)}'");
+
+            if (!string.IsNullOrWhiteSpace(tokenForConnection)) // ИЗМЕНИТЕ IsNullOrEmpty на IsNullOrWhiteSpace для большей надежности
+            {
+                Debug.Log($"[EnsureConnectedAsync] tokenForConnection IS NOT NullOrWhiteSpace. Appending to URL.");
+                char separator = urlToConnect.Contains("?") ? '&' : '?';
+                urlToConnect += $"{separator}access_token={Uri.EscapeDataString(tokenForConnection)}";
+            }
+            else
+            {
+                Debug.Log($"[EnsureConnectedAsync] tokenForConnection IS NullOrWhiteSpace. NOT appending to URL.");
+            }
+            
+            Debug.Log($"[EnsureConnectedAsync] FINAL urlToConnect: '{urlToConnect}'"); // КРИТИЧЕСКИЙ ЛОГ
+            // await connection.ConnectAsync(urlToConnect); // СТАРЫЙ ВЫЗОВ
+
+            // НОВЫЙ ВЫЗОВ: передаем чистый MasterServerUrl и отдельно tokenForConnection
+            // tokenForConnection будет null при анонимном входе
+            await connection.ConnectAsync(MasterServerUrl, tokenForConnection); 
+        }
+    }
+*/
+    private async Task EnsureConnectedAsync(string accessTokenToUse = null, bool forceDisconnect = false)
+    {
+        // Логи для отслеживания состояния
+        Debug.Log($"[EnsureConnectedAsync ENTRY] IsConnected: {connection.IsConnected}, forceDisconnect: {forceDisconnect}, accessTokenToUse: '{accessTokenToUse ?? "NULL"}'");
+
+        if (forceDisconnect && connection.IsConnected)
+        {
+            Debug.Log("[EnsureConnectedAsync] Force disconnecting...");
+            await connection.DisconnectAsync();
+            Debug.Log($"[EnsureConnectedAsync] After DisconnectAsync. IsConnected: {connection.IsConnected}");
+        }
+
+        // Если не подключены (или только что отключились принудительно)
+        if (!connection.IsConnected)
+        {
+            Debug.Log("[EnsureConnectedAsync] Not connected. Attempting to connect...");
+            string tokenForProvider = accessTokenToUse ?? SessionManager.Instance?.AccessToken;
+            // Убедимся, что передаем null, если токен пустой или пробельный
+            if (string.IsNullOrWhiteSpace(tokenForProvider)) 
+            {
+                tokenForProvider = null;
+            }
+            Debug.Log($"[EnsureConnectedAsync] Token for AccessTokenProvider: '{tokenForProvider ?? "NULL"}'");
+            await connection.ConnectAsync(MasterServerUrl, tokenForProvider);
+        }
+        else
+        {
+            // Уже подключены, и не было forceDisconnect, или forceDisconnect был, но мы все равно подключены (что странно)
+            // Возможно, нужно проверить, изменился ли токен, если не было forceDisconnect
+            string currentTokenOnConnection = SessionManager.Instance?.AccessToken; // Предположим, что соединение использует этот токен
+            if (accessTokenToUse != null && accessTokenToUse != currentTokenOnConnection)
+            {
+                Debug.LogWarning($"[EnsureConnectedAsync] Already connected, but requested token '{accessTokenToUse}' differs from current session token '{currentTokenOnConnection}'. Reconnecting with new token.");
+                await connection.DisconnectAsync();
+                await connection.ConnectAsync(MasterServerUrl, accessTokenToUse);
+            }
+            else
+            {
+                Debug.Log("[EnsureConnectedAsync] Already connected and token state seems consistent (or no new token specified). No action taken.");
+            }
+        }
+        Debug.Log($"[EnsureConnectedAsync EXIT] IsConnected: {connection.IsConnected}");
     }
 
-    // --- Заглушки методов API ---
+    private void HandleConnectionError(string errorMessage)
+    {
+        Debug.LogError($"MasterServerApiService: Connection Error: {errorMessage}");
+        // TODO: Показать пользователю сообщение об ошибке соединения
+    }
 
+    // --- Логика обновления токена ---
+    private async Task<bool> TryRefreshTokenAsync()
+    {
+        if (SessionManager.Instance == null || string.IsNullOrEmpty(SessionManager.Instance.RefreshToken))
+        {
+            Debug.LogWarning("No refresh token available to refresh session.");
+            return false;
+        }
+
+        if (isRefreshingToken)
+        {
+            Debug.LogWarning("Token refresh already in progress.");
+            // Можно добавить ожидание завершения текущего рефреша, если это критично
+            await Task.Delay(100); // Простое ожидание
+            return SessionManager.Instance.IsUserLoggedIn; // Возвращаем текущее состояние
+        }
+
+        isRefreshingToken = true;
+        Debug.Log("Attempting to refresh access token...");
+
+        var requestDto = new RefreshTokenRequestDto { RefreshToken = SessionManager.Instance.RefreshToken };
+        
+        // Для вызова RefreshToken нам не нужен текущий AccessToken в URL,
+        // поэтому подключаемся без него, если еще не подключены.
+        // Либо используем уже существующее соединение, если оно есть.
+        if(!connection.IsConnected) await EnsureConnectedAsync(forceDisconnect: true); // Подключаемся без токена для запроса рефреша
+
+        if (!connection.IsConnected)
+        {
+            Debug.LogError("Cannot refresh token: not connected to server.");
+            isRefreshingToken = false;
+            return false;
+        }
+
+        var (success, response, error) = await connection.InvokeHubMethodAsync<TokenResponseDto>("RefreshToken", requestDto);
+
+        if (success && response != null)
+        {
+            Debug.Log("Token refreshed successfully.");
+            // Обновляем только AccessToken и его время жизни. Пользователь остается тот же.
+            // RefreshToken тоже может обновиться на сервере, и сервер его вернет.
+            SessionManager.Instance.CreateSession( // Используем CreateSession для обновления и RefreshToken, если он новый
+                response.AccessToken,
+                response.AccessTokenExpiration,
+                string.IsNullOrEmpty(response.NewRefreshToken) ? SessionManager.Instance.RefreshToken : response.NewRefreshToken, // Используем новый RT, если есть
+                SessionManager.Instance.CurrentUser // Данные пользователя не меняются при рефреше токена
+            );
+            await EnsureConnectedAsync(SessionManager.Instance.AccessToken, forceDisconnect: true); // Переподключаемся с новым access токеном
+            isRefreshingToken = false;
+            return true;
+        }
+        else
+        {
+            Debug.LogError($"Failed to refresh token: {error}. Clearing session.");
+            SessionManager.Instance.ClearSession(); // Если не удалось обновить, разлогиниваем
+            await EnsureConnectedAsync(forceDisconnect: true); // Переподключаемся без токена
+            // TODO: Перенаправить на экран логина
+            // UIManager.Instance.SwitchToScreen(UIScreenType.RegisteredLogin);
+            isRefreshingToken = false;
+            return false;
+        }
+    }
+
+    // Обертка для вызова методов, требующих авторизации
+    private async Task<(bool success, T response, string errorMessage)> InvokeAuthorizedHubMethodAsync<T>(string methodName, params object[] args)
+    {
+        if (SessionManager.Instance == null)
+            return (false, default(T), "SessionManager not available.");
+
+        if (SessionManager.Instance.IsAccessTokenExpiredOrNearingExpiration())
+        {
+            bool refreshed = await TryRefreshTokenAsync();
+            if (!refreshed && !SessionManager.Instance.IsUserLoggedIn) // Если не удалось обновить и мы разлогинены
+            {
+                return (false, default(T), "Session expired or token refresh failed. Please login again.");
+            }
+        }
+        // После попытки рефреша (или если он не нужен), EnsureConnectedAsync должен быть вызван с актуальным токеном
+        // (он вызывается внутри TryRefreshTokenAsync или при обычном старте/логине)
+        // Но для уверенности, перед каждым авторизованным вызовом, убедимся, что подключение актуально с текущим токеном сессии
+        await EnsureConnectedAsync(SessionManager.Instance.AccessToken);
+
+
+        if (!connection.IsConnected) return (false, default(T), "Not connected to server for authorized call.");
+        if (!SessionManager.Instance.IsUserLoggedIn && methodName != "GetAnonymousToken") // Проверяем логин для всех, кроме получения анонимного токена
+        {
+             Debug.LogWarning($"Attempting to call authorized method '{methodName}' while not logged in.");
+             return (false, default(T), "User not logged in.");
+        }
+
+        return await connection.InvokeHubMethodAsync<T>(methodName, args);
+    }
+     private async Task<(bool success, string errorMessage)> SendAuthorizedHubMethodAsync(string methodName, params object[] args)
+    {
+        if (SessionManager.Instance == null)
+            return (false, "SessionManager not available.");
+
+        if (SessionManager.Instance.IsAccessTokenExpiredOrNearingExpiration())
+        {
+            bool refreshed = await TryRefreshTokenAsync();
+            if (!refreshed && !SessionManager.Instance.IsUserLoggedIn)
+            {
+                return (false, "Session expired or token refresh failed. Please login again.");
+            }
+        }
+        await EnsureConnectedAsync(SessionManager.Instance.AccessToken);
+
+        if (!connection.IsConnected) return (false, "Not connected to server for authorized call.");
+        if (!SessionManager.Instance.IsUserLoggedIn)
+        {
+             Debug.LogWarning($"Attempting to send authorized method '{methodName}' while not logged in.");
+             return (false, "User not logged in.");
+        }
+        return await connection.SendHubMethodAsync(methodName, args);
+    }
+
+
+    // --- Методы API ---
+/*
     public async Task<(bool success, TokenResponseDto response, string errorMessage)> GetAnonymousTokenAsync(string nickname)
     {
-        await SimulateNetworkDelay();
-        Debug.Log($"[STUB] MasterServerApiService: GetAnonymousTokenAsync called with Nickname: {nickname}");
+        await EnsureConnectedAsync(forceDisconnect:true); // Анонимный токен - подключаемся без существующего токена
+        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
 
-        if (SimulateAnonymousLoginError || string.IsNullOrWhiteSpace(nickname) || nickname.ToLower() == "error")
+        var requestDto = new AnonymousTokenRequestDto { Nickname = nickname };
+        Debug.Log($"[GetAnonymousTokenAsync] Sending Nickname: '{requestDto.Nickname}'");
+        var result = await connection.InvokeHubMethodAsync<TokenResponseDto>("GetAnonymousToken", requestDto);
+
+        if (result.success && result.response != null && SessionManager.Instance != null)
         {
-            return (false, null, "Stub: Anonymous login failed (simulated error or invalid nickname).");
+            // Анонимный пользователь - UserId и Nickname могут быть специфичными
+            UserSessionData anonUserData = new UserSessionData { UserId = "anonymous_" + nickname, Nickname = nickname };
+            SessionManager.Instance.CreateSession(
+                result.response.AccessToken,
+                result.response.AccessTokenExpiration,
+                result.response.NewRefreshToken, // Анонимы тоже могут иметь RefreshToken
+                anonUserData
+            );
+            // Для анонимного токена переподключение с токеном, если он используется для последующих вызовов.
+            await EnsureConnectedAsync(SessionManager.Instance.AccessToken, forceDisconnect: true);
         }
-
-        var mockResponse = new TokenResponseDto
-        {
-            AccessToken = "fake_ANONYMOUS_access_token_" + Guid.NewGuid().ToString().Substring(0, 8),
-            AccessTokenExpiration = DateTime.UtcNow.AddHours(1),
-            NewRefreshToken = "fake_ANONYMOUS_refresh_token_" + Guid.NewGuid().ToString().Substring(0, 8)
-            // UserId не устанавливаем явно, SessionManager может создать UserSessionData с userId = "anonymous_" + nickname
-        };
-
-        if (SessionManager.Instance != null)
-        {
-            UserSessionData anonUserData = new UserSessionData { UserId = "anonymous_" + nickname, Nickname = nickname, Email = null };
-            SessionManager.Instance.CreateSession(mockResponse.AccessToken, mockResponse.AccessTokenExpiration, mockResponse.NewRefreshToken, anonUserData);
-        }
-        return (true, mockResponse, null);
+        return result;
     }
+*/
+    // MasterServerApiService.cs -> GetAnonymousTokenAsync
+    // MasterServerApiService.cs -> GetAnonymousTokenAsync
+    public async Task<(bool success, TokenResponseDto response, string errorMessage)> GetAnonymousTokenAsync(string nickname)
+    {
+        await EnsureConnectedAsync(); 
+        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
 
+        var requestDto = new AnonymousTokenRequestDto { Nickname = nickname };
+        Debug.Log($"[GetAnonymousTokenAsync] Sending Nickname in DTO: '{requestDto.Nickname}'");
+
+        // Используем InvokeHubMethodAsync, который передает аргументы
+        var (callSuccess, actualResponse, callError) = await connection.InvokeHubMethodAsync<TokenResponseDto>("GetAnonymousToken", requestDto);
+
+        if (callSuccess && actualResponse != null)
+        {
+            Debug.Log($"[GetAnonymousTokenAsync] GetAnonymousToken SUCCEEDED. AccessToken: {actualResponse.AccessToken}");
+            
+            UserSessionData anonUserData = new UserSessionData { UserId = "anonymous_" + nickname, Nickname = nickname };
+            SessionManager.Instance.CreateSession(
+                actualResponse.AccessToken,
+                actualResponse.AccessTokenExpiration,
+                actualResponse.NewRefreshToken, 
+                anonUserData
+            );
+            await EnsureConnectedAsync(SessionManager.Instance.AccessToken, forceDisconnect: true); 
+            return (true, actualResponse, null);
+        }
+        else
+        {
+            Debug.LogError($"[GetAnonymousTokenAsync] GetAnonymousToken FAILED. Error: {callError}");
+            return (false, null, callError);
+        }
+    }
     public async Task<(bool success, RegistrationResultDto response, string errorMessage)> RegisterAsync(string email, string nickname, string password)
     {
-        await SimulateNetworkDelay();
-        Debug.Log($"[STUB] MasterServerApiService: RegisterAsync called with Email: {email}, Nickname: {nickname}");
-
-        if (SimulateRegistrationError || email.ToLower() == "error@example.com")
-        {
-            return (false, new RegistrationResultDto { IsSuccess = false, Errors = new[] { "Stub: Registration failed (simulated error)." } }, "Stub: Registration failed (simulated error).");
-        }
-
-        // Имитируем успешную регистрацию
-        var resultDto = new RegistrationResultDto
-        {
-            IsSuccess = true,
-            UserId = "stub_user_id_" + Guid.NewGuid().ToString().Substring(0,5)
-            // Errors будет null или пустым
-        };
+        await EnsureConnectedAsync(forceDisconnect: true); // Регистрация - обычно без токена
+        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
         
-        // Сообщение для UI, если требуется подтверждение
-        string successMessage = SimulateRegistrationRequiresEmailConfirmation
-            ? "Stub: Registration successful. Please check your email to confirm."
-            : "Stub: Registration successful. You can now login.";
-
-        // Не создаем сессию здесь, пользователь должен будет залогиниться или подтвердить email
-        return (true, resultDto, successMessage); // Передаем сообщение об успехе (или null если не нужно)
+        var requestDto = new RegisterRequestDto { Email = email, Nickname = nickname, Password = password };
+        return await connection.InvokeHubMethodAsync<RegistrationResultDto>("Register", requestDto);
     }
 
     public async Task<(bool success, LoginResponseDto response, string errorMessage)> LoginAsync(string email, string password)
     {
-        await SimulateNetworkDelay();
-        Debug.Log($"[STUB] MasterServerApiService: LoginAsync called with Email: {email}");
+        await EnsureConnectedAsync(forceDisconnect: true); // Логин - без предыдущего токена
+        if (!connection.IsConnected) return (false, null, "Failed to connect to server for login.");
 
-        if (SimulateLoginError || email.ToLower() == "error@example.com")
+        var requestDto = new LoginRequestDto { Identifier = email, Password = password };
+        var result = await connection.InvokeHubMethodAsync<LoginResponseDto>("Login", requestDto);
+
+        if (result.success && result.response != null && !string.IsNullOrEmpty(result.response.AccessToken) && SessionManager.Instance != null)
         {
-            return (false, null, "Stub: Login failed (simulated error or invalid credentials).");
-        }
-
-        string userId = "stub_user_id_for_" + email.Split('@')[0];
-        string userNickname = email.Split('@')[0]; // Простой ник из email для заглушки
-
-        var mockResponse = new LoginResponseDto // Убедитесь, что LoginResponseDto определен и может содержать UserId, Nickname
-        {
-            AccessToken = "fake_LOGGEDIN_access_token_" + Guid.NewGuid().ToString().Substring(0, 8),
-            AccessTokenExpiration = DateTime.UtcNow.AddHours(1),
-            NewRefreshToken = "fake_LOGGEDIN_refresh_token_" + Guid.NewGuid().ToString().Substring(0, 8),
-            UserId = userId,
-            Nickname = userNickname
-        };
-
-        if (SessionManager.Instance != null)
-        {
-            UserSessionData userData = new UserSessionData { UserId = userId, Nickname = userNickname, Email = email };
-            SessionManager.Instance.CreateSession(mockResponse.AccessToken, mockResponse.AccessTokenExpiration, mockResponse.NewRefreshToken, userData);
-        }
-        return (true, mockResponse, null);
-    }
-
-    public async Task<(bool success, TokenResponseDto response, string errorMessage)> RefreshTokenAsync(string refreshTokenToRefresh)
-    {
-        await SimulateNetworkDelay();
-        Debug.Log($"[STUB] MasterServerApiService: RefreshTokenAsync called with RefreshToken: {refreshTokenToRefresh?.Substring(0,10)}...");
-
-        if (SimulateRefreshTokenError || string.IsNullOrEmpty(refreshTokenToRefresh) || refreshTokenToRefresh == "error_refresh_token")
-        {
-            if(SessionManager.Instance != null) SessionManager.Instance.ClearSession(); // Если ошибка, чистим сессию
-            return (false, null, "Stub: Refresh token failed (simulated error or invalid token).");
-        }
-
-        // Имитируем успешное обновление
-        var mockResponse = new TokenResponseDto
-        {
-            AccessToken = "fake_REFRESHED_access_token_" + Guid.NewGuid().ToString().Substring(0, 8),
-            AccessTokenExpiration = DateTime.UtcNow.AddHours(1),
-            NewRefreshToken = "fake_NEW_refresh_token_after_refresh_" + Guid.NewGuid().ToString().Substring(0, 8) // Часто возвращается новый RT
-        };
-        
-        if (SessionManager.Instance != null && SessionManager.Instance.CurrentUser != null)
-        {
-             // Обновляем сессию только токенами, пользователь остается тот же
+            Debug.Log("Login successful, creating session.");
+            UserSessionData userData = new UserSessionData {
+                // Предполагаем, что LoginResponseDto содержит UserId и Nickname
+                // Если нет, их нужно получить из другого источника или оставить null
+                UserId = result.response.UserId, // Убедитесь, что это поле есть в вашем LoginResponseDto
+                Nickname = result.response.Nickname ?? email.Split('@')[0], // Предполагаем вложенный UserInfoDto или берем из email
+                Email = email
+            };
             SessionManager.Instance.CreateSession(
-                mockResponse.AccessToken,
-                mockResponse.AccessTokenExpiration,
-                mockResponse.NewRefreshToken,
-                SessionManager.Instance.CurrentUser
+                result.response.AccessToken,
+                result.response.AccessTokenExpiration,
+                result.response.NewRefreshToken,
+                userData
             );
+            await EnsureConnectedAsync(SessionManager.Instance.AccessToken, forceDisconnect: true); // Переподключаемся с новым токеном
         }
-        return (true, mockResponse, null);
+        return result;
     }
-
 
     public async Task<(bool success, PasswordResetRequestResultDto response, string errorMessage)> RequestPasswordResetAsync(string email)
     {
-        await SimulateNetworkDelay();
-        Debug.Log($"[STUB] MasterServerApiService: RequestPasswordResetAsync called for Email: {email}");
-
-        if (SimulateRequestPasswordResetAccountNotFound || email.ToLower() == "notfound@example.com")
-        {
-            // Имитируем, что аккаунт не найден (сервер может вернуть Succeeded=true, но сообщение другое, или Succeeded=false)
-            // Для простоты заглушки, пусть будет Succeeded=false
-            return (false, new PasswordResetRequestResultDto { IsSuccess = false, Error = "Stub: Account not found." }, "Stub: Account not found.");
-        }
+        await EnsureConnectedAsync(forceDisconnect:true); // Запрос на сброс - без токена
+        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
         
-        // Имитируем успешную отправку запроса
-        return (true, new PasswordResetRequestResultDto { IsSuccess = true, Error = "Stub: If an account exists, an email has been sent." }, null);
+        return await connection.InvokeHubMethodAsync<PasswordResetRequestResultDto>("RequestPasswordReset", email);
     }
 
     public async Task<(bool success, PasswordResetResultDto response, string errorMessage)> ResetPasswordAsync(string userId, string token, string newPassword)
     {
-        await SimulateNetworkDelay();
-        Debug.Log($"[STUB] MasterServerApiService: ResetPasswordAsync called for UserId: {userId}, Token: {token}");
-
-        if (SimulateResetPasswordError || token == "invalid_reset_token")
-        {
-            return (false, new PasswordResetResultDto { IsSuccess = false, Errors = new[]{"Stub: Password reset failed (simulated error or invalid token)."} }, "Stub: Password reset failed.");
-        }
+        await EnsureConnectedAsync(forceDisconnect:true); // Сброс - без токена
+        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
         
-        return (true, new PasswordResetResultDto { IsSuccess = true }, null);
-    }
-    
-    public async Task<(bool success, string errorMessage)> LogoutAsync()
-    {
-        await SimulateNetworkDelay();
-        Debug.Log("[STUB] MasterServerApiService: LogoutAsync called.");
-
-        if (SessionManager.Instance != null)
-        {
-            SessionManager.Instance.ClearSession();
-        }
-        // В реальном приложении EnsureConnectedAsync(forceDisconnect: true) вызывался бы для переподключения без токена.
-        // Для заглушки это не так важно, если только другой код не проверяет состояние подключения.
-        return (true, null);
+        return await connection.InvokeHubMethodAsync<PasswordResetResultDto>("ResetPassword", userId, token, newPassword);
     }
 
-    // Пример для авторизованного метода
     public async Task<(bool success, List<GameServerInfoDto> response, string errorMessage)> GetServerListAsync()
     {
-        await SimulateNetworkDelay();
-        Debug.Log("[STUB] MasterServerApiService: GetServerListAsync called.");
-
-        if (SessionManager.Instance == null || !SessionManager.Instance.IsUserLoggedIn)
-        {
-            return (false, null, "Stub: User not authenticated to get server list.");
-        }
-        if (SimulateGetServerListError)
-        {
-             return (false, null, "Stub: Failed to get server list (simulated error).");
-        }
-
-        var mockServers = new List<GameServerInfoDto>
-        {
-            new GameServerInfoDto { Id = "stub_server_1", Name = "Stub Alpha", CurrentPlayers = 10, MaxPlayers = 50, Ping = 30 },
-            new GameServerInfoDto { Id = "stub_server_2", Name = "Stub Beta", CurrentPlayers = 5, MaxPlayers = 20, Ping = 50 }
-        };
-        return (true, mockServers, null);
+        // Используем обертку для авторизованных вызовов
+        return await InvokeAuthorizedHubMethodAsync<List<GameServerInfoDto>>("GetServerList");
     }
 
-    // --- Добавьте заглушки для других методов по аналогии ---
-    // public async Task<(bool success, EmailConfirmationResultDto response, string errorMessage)> ConfirmEmailAsync(string userId, string code)
-    // {
-    //     await SimulateNetworkDelay();
-    //     // ... логика заглушки ...
-    //     return (true, new EmailConfirmationResultDto { IsSuccess = true }, null);
-    // }
+    public async Task<(bool success, string errorMessage)> LogoutAsync()
+    {
+        // Используем обертку (если Logout требует быть авторизованным для инвалидации серверной сессии)
+        // или вызываем напрямую, если он публичный, но тогда ClearSession нужно делать по-другому.
+        // Предположим, Logout на сервере требует авторизации для инвалидации RefreshToken.
+        var result = await SendAuthorizedHubMethodAsync("Logout");
+
+        // Вне зависимости от успеха на сервере (может быть уже невалидный токен), чистим локальную сессию.
+        if(SessionManager.Instance != null) SessionManager.Instance.ClearSession();
+        await EnsureConnectedAsync(forceDisconnect: true); // Переподключаемся без токена
+
+        return result; // Возвращаем результат операции с сервером
+    }
+
+    private async void OnApplicationQuit()
+    {
+        if (connection != null && connection.IsConnected)
+        {
+            await connection.DisconnectAsync();
+        }
+    }
 }
+
+// Не забудьте DTO для RefreshTokenRequestDto:
+// public class RefreshTokenRequestDto { public string RefreshToken { get; set; } }
+
+// Убедитесь, что LoginResponseDto содержит UserId и, возможно, вложенный UserInfoDto с Nickname,
+// если вы хотите это сохранять в UserSessionData при логине.
+// public class LoginResponseDto : TokenResponseDto
+// {
+//     public string UserId { get; set; } // Пример
+//     public UserInfoDto User { get; set; } // Пример
+// }
+// public class UserInfoDto { public string Nickname { get; set; } /* ... */ }
+
+// Убедитесь, что все эти DTO определены в вашем проекте Unity (папка Scripts/DTOs):
+// - AnonymousTokenRequestDto
+// - RegisterRequestDto
+// - LoginRequestDto
+// - TokenResponseDto
+// - LoginResponseDto (может наследоваться от TokenResponseDto)
+// - GameServerInfoDto
+// - RegistrationResultDto
+// - PasswordResetRequestResultDto
+// - PasswordResetResultDto
+// - (AuthResultDto, EmailConfirmationResultDto - если понадобятся для других методов)

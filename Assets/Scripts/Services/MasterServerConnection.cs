@@ -16,14 +16,14 @@ public class MasterServerConnection
     // Например, если сервер сам пушит какие-то данные
     // public event Action<GameServerInfoDto> OnServerStatusUpdate;
 
-    public async Task ConnectAsync(string hubUrl, string accessToken = null)
+    public async Task ConnectAsync(string hubUrl, string accessTokenForProvider  = null)
     {
-        if (IsConnected)
+        /*if (IsConnected)
         {
             Debug.Log("Already connected to Master Server.");
             return;
         }
-
+        Debug.Log($"[MasterServerConnection.ConnectAsync] hubUrl received: '{hubUrl}'");
         var hubConnectionBuilder = new HubConnectionBuilder()
             .WithUrl(hubUrl, options =>
             {
@@ -41,12 +41,55 @@ public class MasterServerConnection
                     // options.AccessTokenProvider = () => Task.FromResult(accessToken);
                     // или
                     // options.Headers["Authorization"] = $"Bearer {accessToken}";
+                    Debug.Log($"[MasterServerConnection.ConnectAsync WithUrl Options] Configuring options for hubUrl: {hubUrl}");
                 }
             })
             .WithAutomaticReconnect(); // Настроить политику реконнекта
 
         // Если используете MessagePack для бинарной сериализации (быстрее JSON)
-        // .AddMessagePackProtocol();
+        // .AddMessagePackProtocol();*/
+        if (IsConnected)
+        {
+            Debug.Log("Already connected to Master Server.");
+            return;
+        }
+
+        // Убедимся, что accessTokenForProvider используется только для AccessTokenProvider
+        // А hubUrl должен быть чистым, если токена нет
+        string cleanHubUrl = hubUrl;
+        string tokenFromHubUrl = null;
+
+        // Попробуем извлечь токен из hubUrl, если он там был случайно добавлен
+        // и передать его через AccessTokenProvider, а сам hubUrl очистить.
+        // Это усложнение, но для диагностики.
+        int tokenQueryIndex = hubUrl.IndexOf("?access_token=");
+        if (tokenQueryIndex == -1) tokenQueryIndex = hubUrl.IndexOf("&access_token=");
+
+        if (tokenQueryIndex != -1)
+        {
+            cleanHubUrl = hubUrl.Substring(0, tokenQueryIndex);
+            // Здесь нужно аккуратно извлечь значение токена, если оно есть
+            // Но для нашего случая, если мы хотим чистый URL, лучше просто убедиться,
+            // что hubUrl, передаваемый в WithUrl, чистый.
+            // А accessTokenForProvider будет null, если токена нет.
+            Debug.LogWarning($"[MasterServerConnection.ConnectAsync] Token was found in hubUrl ('{hubUrl}'). Will attempt to use AccessTokenProvider instead. Cleaned URL: '{cleanHubUrl}'");
+        }
+        
+        // Если мы сюда передаем чистый hubUrl из MasterServerApiService,
+        // то этот accessTokenForProvider должен быть тем, что реально нужно.
+        // При анонимном входе он должен быть null.
+
+        Debug.Log($"[MasterServerConnection.ConnectAsync] hubUrl for WithUrl: '{cleanHubUrl}', accessTokenForProvider: '{(accessTokenForProvider == null ? "NULL" : accessTokenForProvider)}'");
+
+        var hubConnectionBuilder = new HubConnectionBuilder()
+        .WithUrl(cleanHubUrl, options => // Используем cleanHubUrl
+        {
+            Debug.Log($"[MasterServerConnection.ConnectAsync WithUrl Options] Configuring options. AccessTokenForProvider is '{(accessTokenForProvider == null ? "NULL" : accessTokenForProvider)}'");
+            // Используем AccessTokenProvider, даже если токен null.
+            // Это может предотвратить добавление библиотекой пустого ?access_token=
+            options.AccessTokenProvider = () => Task.FromResult(accessTokenForProvider);
+        })
+        .WithAutomaticReconnect(); 
 
         connection = hubConnectionBuilder.Build();
 
@@ -103,6 +146,31 @@ public class MasterServerConnection
             return (false, default(TResponse), ex.Message);
         }
     }
+    public async Task<(bool success, TResponse response, string errorMessage)> InvokeHubMethodAsync<TResponse>(string methodName) // БЕЗ params object[] args
+{
+    if (!IsConnected)
+    {
+        Debug.LogError("Not connected to Master Server. Cannot invoke method.");
+        return (false, default(TResponse), "Not connected to server.");
+    }
+
+    try
+    {
+        // Используем перегрузку InvokeAsync, которая не принимает массив args
+        TResponse result = await connection.InvokeAsync<TResponse>(methodName);
+        return (true, result, null);
+    }
+    catch (HubException hubEx)
+    {
+        Debug.LogError($"HubException invoking {methodName} (no-args): {hubEx.Message}");
+        return (false, default(TResponse), hubEx.Message);
+    }
+    catch (Exception ex)
+    {
+        Debug.LogError($"Exception invoking {methodName} (no-args): {ex.Message}");
+        return (false, default(TResponse), ex.Message);
+    }
+}
     
     // Метод для вызова хаб-методов, которые не возвращают значение (void на сервере)
     public async Task<(bool success, string errorMessage)> SendHubMethodAsync(string methodName, params object[] args)
