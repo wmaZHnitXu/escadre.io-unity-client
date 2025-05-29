@@ -79,7 +79,7 @@ public class ServerComposer : MonoBehaviour
             Logger.LogWarning("[ServerComposer MB] MockNetworkLayer found in scene. Assign in Inspector for robustness.");
         }
 
-        _visibilityStrategy = new DummyVisibilityStrategy();
+        _visibilityStrategy = new QuadTreeVisibilityStrategy();
         _connectionValidator = new MockClientConnectionValidator();
 
         if (oceanSettingsProvider == null)
@@ -325,7 +325,10 @@ public class ServerComposer : MonoBehaviour
             Logger.LogWarning("[ServerComposer] Core or Level not initialized. Cannot create ResourceBox.");
             return;
         }
-        var box = new Core.Model.ResourceBox(_coreComposer.ServerLevel, Core.Primitives.Vector3.Zero, 100); // Spawns a box with 100 resources
-        Logger.Log($"[ServerComposer MB Action] Created ResourceBox Entity ID: {box.Id} at origin.");
+        for (int i = 0; i < 1000; i++)
+        {
+            var box = new Core.Model.ResourceBox(_coreComposer.ServerLevel, new Core.Primitives.Vector3(UnityEngine.Random.Range(-100f, 100f), 0f, UnityEngine.Random.Range(-100f, 100f)), 100); // Spawns a box with 100 resources
+        }
+        //Logger.Log($"[ServerComposer MB Action] Created ResourceBox Entity ID: {box.Id} at origin.");
     }
 }
