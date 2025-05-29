@@ -10,6 +10,7 @@ public class MasterServerApiService : MonoBehaviour
 
     private MasterServerConnection connection;
     public string MasterServerUrl = "http://localhost:5076/masterhub"; // Укажите ваш URL
+    private TaskCompletionSource<(bool success, RegistrationResultDto response, string errorMessage)> _registrationTcs;
 
     private bool isRefreshingToken = false; // Флаг, чтобы избежать одновременных запросов на обновление токена
 
@@ -21,6 +22,10 @@ public class MasterServerApiService : MonoBehaviour
             DontDestroyOnLoad(gameObject);
             connection = new MasterServerConnection();
             connection.OnConnectionError += HandleConnectionError;
+
+            // Подписка на события регистрации из MasterServerConnection
+            connection.OnRegistrationSuccess += HandleRegistrationSuccess;
+            connection.OnRegistrationFailed += HandleRegistrationFailed;
         }
         else
         {
@@ -30,7 +35,7 @@ public class MasterServerApiService : MonoBehaviour
 
     private async void Start()
     {
-        /* При старте приложения пытаемся восстановить сессию, если есть RefreshToken
+        //При старте приложения пытаемся восстановить сессию, если есть RefreshToken
         if (SessionManager.Instance != null && !string.IsNullOrEmpty(SessionManager.Instance.RefreshToken))
         {
             Debug.Log("Found stored refresh token. Attempting to refresh session on start...");
@@ -39,67 +44,10 @@ public class MasterServerApiService : MonoBehaviour
         else
         {
             await EnsureConnectedAsync(); // Обычное подключение без токена
-        }*/
+        }
         Debug.LogWarning("[MasterServerApiService.Start] Automatic connection on start is TEMPORARILY DISABLED for debugging.");
     }
-/*
-    private async Task EnsureConnectedAsync(string accessTokenToUse = null, bool forceDisconnect = false)
-    {
-        string tokenForConnection = accessTokenToUse ?? SessionManager.Instance?.AccessToken;
 
-        if (connection.IsConnected)
-        {
-            if (forceDisconnect || (SessionManager.Instance != null && tokenForConnection != SessionManager.Instance.AccessToken && !string.IsNullOrEmpty(SessionManager.Instance.AccessToken))) // Если токен изменился (например, после логина/логаута)
-            {
-                Debug.Log("Token state changed or forced disconnect. Reconnecting...");
-                await connection.DisconnectAsync();
-            }
-            else if (!forceDisconnect) // Если уже подключены и токен не менялся, и не было форс-дисконнекта
-            {
-                return;
-            }
-        }
-        
-        // Если после возможных дисконнектов мы всё еще не подключены или был форс-дисконнект
-        if (!connection.IsConnected || forceDisconnect) {
-            string urlToConnect = MasterServerUrl;
-            if (!string.IsNullOrEmpty(tokenForConnection))
-            {
-                char separator = urlToConnect.Contains("?") ? '&' : '?';
-                urlToConnect += $"{separator}access_token={Uri.EscapeDataString(tokenForConnection)}";
-            }
-            
-            Debug.Log($"Attempting to connect to: {urlToConnect}");
-            await connection.ConnectAsync(urlToConnect);
-        }
-        if (!connection.IsConnected || forceDisconnect) {
-            string urlToConnect = MasterServerUrl;
-            // Добавим больше логов здесь, чтобы понять, что происходит с tokenForConnection
-            Debug.Log($"[EnsureConnectedAsync] Initial MasterServerUrl: '{MasterServerUrl}'");
-            Debug.Log($"[EnsureConnectedAsync] accessTokenToUse: '{(accessTokenToUse == null ? "NULL" : accessTokenToUse)}'");
-            Debug.Log($"[EnsureConnectedAsync] SessionManager.Instance.AccessToken: '{(SessionManager.Instance?.AccessToken == null ? "NULL" : SessionManager.Instance.AccessToken)}'");
-            Debug.Log($"[EnsureConnectedAsync] tokenForConnection (before IsNullOrEmpty check): '{(tokenForConnection == null ? "NULL" : tokenForConnection)}'");
-
-            if (!string.IsNullOrWhiteSpace(tokenForConnection)) // ИЗМЕНИТЕ IsNullOrEmpty на IsNullOrWhiteSpace для большей надежности
-            {
-                Debug.Log($"[EnsureConnectedAsync] tokenForConnection IS NOT NullOrWhiteSpace. Appending to URL.");
-                char separator = urlToConnect.Contains("?") ? '&' : '?';
-                urlToConnect += $"{separator}access_token={Uri.EscapeDataString(tokenForConnection)}";
-            }
-            else
-            {
-                Debug.Log($"[EnsureConnectedAsync] tokenForConnection IS NullOrWhiteSpace. NOT appending to URL.");
-            }
-            
-            Debug.Log($"[EnsureConnectedAsync] FINAL urlToConnect: '{urlToConnect}'"); // КРИТИЧЕСКИЙ ЛОГ
-            // await connection.ConnectAsync(urlToConnect); // СТАРЫЙ ВЫЗОВ
-
-            // НОВЫЙ ВЫЗОВ: передаем чистый MasterServerUrl и отдельно tokenForConnection
-            // tokenForConnection будет null при анонимном входе
-            await connection.ConnectAsync(MasterServerUrl, tokenForConnection); 
-        }
-    }
-*/
     private async Task EnsureConnectedAsync(string accessTokenToUse = null, bool forceDisconnect = false)
     {
         // Логи для отслеживания состояния
@@ -149,7 +97,35 @@ public class MasterServerApiService : MonoBehaviour
         Debug.LogError($"MasterServerApiService: Connection Error: {errorMessage}");
         // TODO: Показать пользователю сообщение об ошибке соединения
     }
+    private void HandleRegistrationSuccess(string serverMessage) // Сервер шлет простое сообщение
+    {
+        if (_registrationTcs == null || _registrationTcs.Task.IsCompleted) return;
 
+        // На сервере в MasterHub.Register в случае успеха отправляется:
+        // await Clients.Caller.SendAsync("RegistrationSuccess", "User registered successfully. Please check your email to confirm your account.");
+        // UserId не передается в этом сообщении.
+        // Если он нужен на клиенте сразу после регистрации, серверный метод должен быть изменен.
+        // Пока что создаем DTO без UserId.
+        var resultDto = new RegistrationResultDto 
+        { 
+            IsSuccess = true, 
+            UserId = null, // UserId не приходит от сервера в этом событии
+            Errors = null
+        };
+        _registrationTcs.TrySetResult((true, resultDto, serverMessage));
+    }
+    private void HandleRegistrationFailed(List<string> errors) // Сервер шлет список ошибок
+    {
+        if (_registrationTcs == null || _registrationTcs.Task.IsCompleted) return;
+
+        var resultDto = new RegistrationResultDto 
+        { 
+            IsSuccess = false, 
+            UserId = null,
+            Errors = errors?.ToArray() // Преобразуем List<string> в string[]
+        };
+        _registrationTcs.TrySetResult((false, resultDto, string.Join("; ", errors ?? new List<string>())));
+    }
     // --- Логика обновления токена ---
     private async Task<bool> TryRefreshTokenAsync()
     {
@@ -268,34 +244,7 @@ public class MasterServerApiService : MonoBehaviour
 
 
     // --- Методы API ---
-/*
-    public async Task<(bool success, TokenResponseDto response, string errorMessage)> GetAnonymousTokenAsync(string nickname)
-    {
-        await EnsureConnectedAsync(forceDisconnect:true); // Анонимный токен - подключаемся без существующего токена
-        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
 
-        var requestDto = new AnonymousTokenRequestDto { Nickname = nickname };
-        Debug.Log($"[GetAnonymousTokenAsync] Sending Nickname: '{requestDto.Nickname}'");
-        var result = await connection.InvokeHubMethodAsync<TokenResponseDto>("GetAnonymousToken", requestDto);
-
-        if (result.success && result.response != null && SessionManager.Instance != null)
-        {
-            // Анонимный пользователь - UserId и Nickname могут быть специфичными
-            UserSessionData anonUserData = new UserSessionData { UserId = "anonymous_" + nickname, Nickname = nickname };
-            SessionManager.Instance.CreateSession(
-                result.response.AccessToken,
-                result.response.AccessTokenExpiration,
-                result.response.NewRefreshToken, // Анонимы тоже могут иметь RefreshToken
-                anonUserData
-            );
-            // Для анонимного токена переподключение с токеном, если он используется для последующих вызовов.
-            await EnsureConnectedAsync(SessionManager.Instance.AccessToken, forceDisconnect: true);
-        }
-        return result;
-    }
-*/
-    // MasterServerApiService.cs -> GetAnonymousTokenAsync
-    // MasterServerApiService.cs -> GetAnonymousTokenAsync
     public async Task<(bool success, TokenResponseDto response, string errorMessage)> GetAnonymousTokenAsync(string nickname)
     {
         await EnsureConnectedAsync(); 
@@ -327,13 +276,51 @@ public class MasterServerApiService : MonoBehaviour
             return (false, null, callError);
         }
     }
+    
     public async Task<(bool success, RegistrationResultDto response, string errorMessage)> RegisterAsync(string email, string nickname, string password)
     {
-        await EnsureConnectedAsync(forceDisconnect: true); // Регистрация - обычно без токена
-        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
+        await EnsureConnectedAsync(forceDisconnect: true);
+        if (!connection.IsConnected) 
+        {
+            return (false, new RegistrationResultDto { IsSuccess = false, Errors = new[]{"Connection failed."} }, "Failed to connect to server.");
+        }
+
+        _registrationTcs = new TaskCompletionSource<(bool success, RegistrationResultDto response, string errorMessage)>();
         
         var requestDto = new RegisterRequestDto { Email = email, Nickname = nickname, Password = password };
-        return await connection.InvokeHubMethodAsync<RegistrationResultDto>("Register", requestDto);
+        
+        // Используем SendHubMethodAsync, так как серверный Register не возвращает Task<T>
+        var (sendSuccess, sendError) = await connection.SendHubMethodAsync("Register", requestDto);
+
+        if (!sendSuccess)
+        {
+            // Если сам вызов SendAsync провалился (например, отвалилось соединение в момент вызова)
+            // _registrationTcs.TrySetCanceled(); // или TrySetException, если это более уместно
+            return (false, new RegistrationResultDto { IsSuccess = false, Errors = new[]{sendError ?? "Failed to send request."} }, sendError ?? "Failed to send registration request.");
+        }
+
+        // Ожидаем результат из HandleRegistrationSuccess или HandleRegistrationFailed
+        // Можно добавить таймаут для _registrationTcs.Task
+        try
+        {
+            // Пример с таймаутом в 15 секунд
+            var completedTask = await Task.WhenAny(_registrationTcs.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+            if (completedTask == _registrationTcs.Task)
+            {
+                return await _registrationTcs.Task;
+            }
+            else
+            {
+                Debug.LogError("Registration request timed out.");
+                _registrationTcs.TrySetCanceled(); // Отменяем TCS, чтобы избежать утечек, если он не завершился
+                return (false, new RegistrationResultDto { IsSuccess = false, Errors = new[]{"Request timed out."} }, "Registration request timed out.");
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            Debug.LogWarning("Registration task was cancelled (likely due to timeout or external cancellation).");
+            return (false, new RegistrationResultDto { IsSuccess = false, Errors = new[]{"Request cancelled."} }, "Registration request cancelled.");
+        }
     }
 
     public async Task<(bool success, LoginResponseDto response, string errorMessage)> LoginAsync(string email, string password)
@@ -408,7 +395,22 @@ public class MasterServerApiService : MonoBehaviour
             await connection.DisconnectAsync();
         }
     }
+    private void OnDestroy()
+    {
+        if (connection != null)
+        {
+            connection.OnConnectionError -= HandleConnectionError; // Если вы его еще где-то используете
+            connection.OnRegistrationSuccess -= HandleRegistrationSuccess;
+            connection.OnRegistrationFailed -= HandleRegistrationFailed;
+            // Отписка от других событий, если они есть
+        }
+        // Если _registrationTcs может остаться "висеть" при уничтожении объекта, его стоит отменить
+        _registrationTcs?.TrySetCanceled();
+    }
+
+
 }
+
 
 // Не забудьте DTO для RefreshTokenRequestDto:
 // public class RefreshTokenRequestDto { public string RefreshToken { get; set; } }

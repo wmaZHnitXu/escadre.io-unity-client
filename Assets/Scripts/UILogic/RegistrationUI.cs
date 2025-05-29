@@ -1,9 +1,9 @@
 // Scripts/UI/RegistrationUI.cs
 using UnityEngine;
 using UnityEngine.UI;
-using Assets.Scripts.UILogic;
+using Assets.Scripts.UILogic; // Убедитесь, что этот using нужен и правильный
 using TMPro;
-using Assets.Scripts.UILogic;
+// using Assets.Scripts.UILogic; // Дублирующийся using, можно убрать
 
 public class RegistrationUI : UIScreen
 {
@@ -13,16 +13,22 @@ public class RegistrationUI : UIScreen
     [SerializeField] private TMP_InputField passwordInputField;
     [SerializeField] private TMP_InputField confirmPasswordInputField;
     [SerializeField] private Button backButton;
-    [SerializeField] private Button registerActionButton; // Кнопка "Зарегистрироваться" (действия)
+    [SerializeField] private Button registerActionButton;
 
     private UIManager uiManager;
-    private MasterServerService masterServerService; // Для отправки запроса на регистрацию
+    // private MasterServerService masterServerService; // Старое имя, у вас используется MasterServerApiService
+    private MasterServerApiService masterServerApiService; // Правильное имя сервиса
 
     protected override void Awake()
     {
         base.Awake();
         uiManager = FindObjectOfType<UIManager>();
-        masterServerService = FindObjectOfType<MasterServerService>();
+        // masterServerService = FindObjectOfType<MasterServerService>(); // Старое имя
+        masterServerApiService = MasterServerApiService.Instance; // Используем Singleton Instance
+        if (masterServerApiService == null)
+        {
+            Debug.LogError("MasterServerApiService not found in the scene or not initialized!");
+        }
     }
 
     private void Start()
@@ -35,16 +41,16 @@ public class RegistrationUI : UIScreen
     {
         base.OnShow();
         Debug.Log("Registration Screen Shown.");
-        // Очистка полей при показе
         emailInputField.text = "";
         nicknameInputField.text = "";
         passwordInputField.text = "";
         confirmPasswordInputField.text = "";
+        SetInteractable(true); // Убедимся, что UI интерактивен при показе
     }
 
     private void OnBackButtonClicked()
     {
-        uiManager.SwitchToScreen(UIScreenType.RegisteredLogin); // Возвращаемся на экран логина
+        uiManager.SwitchToScreen(UIScreenType.RegisteredLogin);
     }
 
     private async void OnRegisterActionButtonClicked()
@@ -54,73 +60,83 @@ public class RegistrationUI : UIScreen
         string password = passwordInputField.text;
         string confirmPassword = confirmPasswordInputField.text;
 
-        // TODO: Добавить валидацию полей (непустые, email-формат, совпадение паролей и т.д.)
-        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(nickname) || string.IsNullOrWhiteSpace(password))
+        if (string.IsNullOrWhiteSpace(email) || !IsValidEmail(email)) // Добавим простую валидацию email
         {
-            Debug.LogError("Registration fields cannot be empty.");
-            // TODO: Показать ошибку пользователю
+            Debug.LogError("Invalid or empty email.");
+            // TODO: Показать ошибку пользователю (например, через UIManager.ShowNotification)
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(nickname))
+        {
+            Debug.LogError("Nickname cannot be empty.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 6) // Пример минимальной длины пароля
+        {
+            Debug.LogError("Password is too short (minimum 6 characters) or empty.");
             return;
         }
         if (password != confirmPassword)
         {
             Debug.LogError("Passwords do not match.");
-            // TODO: Показать ошибку пользователю
             return;
         }
 
+        SetInteractable(false); // Блокируем UI
         Debug.Log($"Attempting to register: Email='{email}', Nickname='{nickname}'");
-        // TODO: Вызвать masterServerService.RegisterAsync(email, nickname, password);
-        // Заглушка:
-        SetInteractable(false); // Блокируем UI на время "запроса"
-        // TODO: Заменить на реальный вызов masterServerService.RegisterAsync(email, nickname, password);
-        // И реальная логика должна быть:
-        // 1. Отправка запроса на регистрацию.
-        // 2. Если сервер требует подтверждения email:
-        //    - Сервер НЕ логинит пользователя сразу.
-        //    - Сервер отправляет письмо.
-        //    - Клиент показывает экран EmailConfirmationSent.
-        // 3. Если сервер НЕ требует подтверждения (или оно опционально и выключено):
-        //    - Сервер может сразу залогинить и вернуть токены.
-        //    - Клиент переходит на UserProfile или RegisteredLogin (для ввода данных).
 
-        // ЗАГЛУШКА для сценария с подтверждением email:
-        await System.Threading.Tasks.Task.Delay(1000); // Имитация запроса к серверу
-
-        bool mockServerRequiresEmailConfirmation = true; // Предположим, сервер требует подтверждения
-        bool mockRegistrationRequestSentSuccessfully = true; // Запрос на регистрацию прошел (не сама регистрация)
-
-        if (mockRegistrationRequestSentSuccessfully)
+        // --- РЕАЛЬНЫЙ ВЫЗОВ ---
+        if (masterServerApiService == null)
         {
-            if (mockServerRequiresEmailConfirmation)
-            {
-                Debug.Log("Registration request sent (mock). Email confirmation required. Switching to EmailConfirmationSent screen.");
-                uiManager.SwitchToScreen(UIScreenType.EmailConfirmationSent);
-            }
-            else
-            {
-                Debug.Log("Registration successful and auto-logged in (mock). Switching to UserProfile.");
-                // Здесь должна быть логика сохранения токенов, если сервер их вернул
-                uiManager.SwitchToScreen(UIScreenType.UserProfileUI);
-            }
+            Debug.LogError("MasterServerApiService is not available for registration.");
+            SetInteractable(true);
+            return;
+        }
+
+        // Используем обновленный MasterServerApiService.RegisterAsync, который работает с событиями
+        var (success, response, errorMessage) = await masterServerApiService.RegisterAsync(email, nickname, password);
+
+        if (success)
+        {
+            // Серверный метод Register в MasterHub отправляет только сообщение "User registered successfully..."
+            // Он НЕ возвращает RegistrationResultDto напрямую.
+            // Логика обработки ответа должна быть в MasterServerApiService.HandleRegistrationSuccess/Failed
+            // и _registrationTcs.TrySetResult.
+            // Здесь мы проверяем результат, который вернул TaskCompletionSource.
+            Debug.Log($"Registration successful (client-side perspective): {errorMessage}"); // errorMessage здесь будет сообщением от сервера
+            // Предполагаем, что сервер ТРЕБУЕТ подтверждения email (так настроено в Program.cs)
+            uiManager.SwitchToScreen(UIScreenType.EmailConfirmationSent);
         }
         else
         {
-            Debug.LogError("Registration request failed (mock).");
-            // TODO: Показать ошибку пользователю
+            Debug.LogError($"Registration failed: {errorMessage}");
+            // TODO: Показать пользователю errorMessage
             SetInteractable(true);
         }
-         //SetInteractable(true); // Разблокируем в любом случае (если не было перехода)
+        // SetInteractable(true); // Разблокируем, если не было перехода на другой экран (уже сделано в else)
     }
     
+    private bool IsValidEmail(string email) // Простая проверка формата email
+    {
+        try
+        {
+            var addr = new System.Net.Mail.MailAddress(email);
+            return addr.Address == email;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private void SetInteractable(bool state)
     {
-        // Простой способ заблокировать основные элементы
         emailInputField.interactable = state;
         nicknameInputField.interactable = state;
         passwordInputField.interactable = state;
         confirmPasswordInputField.interactable = state;
         backButton.interactable = state;
         registerActionButton.interactable = state;
-        if(canvasGroup != null) canvasGroup.interactable = state; // Глобально для панели
+        if(canvasGroup != null) canvasGroup.interactable = state;
     }
 }

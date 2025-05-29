@@ -4,92 +4,37 @@ using Microsoft.AspNetCore.SignalR.Client; // Проверьте правиль�
 using System;
 using System.Threading.Tasks;
 using UnityEngine; // Для Debug.Log
+using System.Collections.Generic; 
 
 public class MasterServerConnection
 {
     private HubConnection connection;
     public bool IsConnected => connection?.State == HubConnectionState.Connected;
 
-    public event Action<string> OnConnectionError; // Событие для ошибок подключения
+    public event Action<string> OnConnectionError;
 
-    // События для ответов от сервера, которые не являются прямым результатом InvokeAsync
-    // Например, если сервер сам пушит какие-то данные
-    // public event Action<GameServerInfoDto> OnServerStatusUpdate;
+    // !!!!! ОБЪЯВЛЕНИЕ СОБЫТИЙ ДЛЯ РЕГИСТРАЦИИ !!!!!
+    public event Action<string> OnRegistrationSuccess;      // Для успешной регистрации (сообщение от сервера)
+    public event Action<List<string>> OnRegistrationFailed; // Для неуспешной регистрации (список ошибок от сервера)
+    // !!!!! КОНЕЦ ОБЪЯВЛЕНИЯ СОБЫТИЙ !!!!!
 
-    public async Task ConnectAsync(string hubUrl, string accessTokenForProvider  = null)
+    public async Task ConnectAsync(string hubUrl, string accessTokenForProvider = null)
     {
-        /*if (IsConnected)
-        {
-            Debug.Log("Already connected to Master Server.");
-            return;
-        }
-        Debug.Log($"[MasterServerConnection.ConnectAsync] hubUrl received: '{hubUrl}'");
-        var hubConnectionBuilder = new HubConnectionBuilder()
-            .WithUrl(hubUrl, options =>
-            {
-                if (!string.IsNullOrEmpty(accessToken))
-                {
-                    // Для SignalR токен обычно передается в QueryString или как Bearer токен в заголовках,
-                    // если используется HTTP-based транспорт (WebSockets обычно так и делают).
-                    // Для передачи через QueryString:
-                    // (URL уже должен содержать ?access_token=... или &access_token=...)
-                    // На сервере в Program.cs уже настроен прием из QueryString:
-                    // options.Events.OnMessageReceived = context => {
-                    //     var accessToken = context.Request.Query["access_token"]; ... }
-
-                    // Если ваш клиент SignalR поддерживает установку заголовков для WebSockets:
-                    // options.AccessTokenProvider = () => Task.FromResult(accessToken);
-                    // или
-                    // options.Headers["Authorization"] = $"Bearer {accessToken}";
-                    Debug.Log($"[MasterServerConnection.ConnectAsync WithUrl Options] Configuring options for hubUrl: {hubUrl}");
-                }
-            })
-            .WithAutomaticReconnect(); // Настроить политику реконнекта
-
-        // Если используете MessagePack для бинарной сериализации (быстрее JSON)
-        // .AddMessagePackProtocol();*/
         if (IsConnected)
         {
             Debug.Log("Already connected to Master Server.");
             return;
         }
 
-        // Убедимся, что accessTokenForProvider используется только для AccessTokenProvider
-        // А hubUrl должен быть чистым, если токена нет
-        string cleanHubUrl = hubUrl;
-        string tokenFromHubUrl = null;
-
-        // Попробуем извлечь токен из hubUrl, если он там был случайно добавлен
-        // и передать его через AccessTokenProvider, а сам hubUrl очистить.
-        // Это усложнение, но для диагностики.
-        int tokenQueryIndex = hubUrl.IndexOf("?access_token=");
-        if (tokenQueryIndex == -1) tokenQueryIndex = hubUrl.IndexOf("&access_token=");
-
-        if (tokenQueryIndex != -1)
-        {
-            cleanHubUrl = hubUrl.Substring(0, tokenQueryIndex);
-            // Здесь нужно аккуратно извлечь значение токена, если оно есть
-            // Но для нашего случая, если мы хотим чистый URL, лучше просто убедиться,
-            // что hubUrl, передаваемый в WithUrl, чистый.
-            // А accessTokenForProvider будет null, если токена нет.
-            Debug.LogWarning($"[MasterServerConnection.ConnectAsync] Token was found in hubUrl ('{hubUrl}'). Will attempt to use AccessTokenProvider instead. Cleaned URL: '{cleanHubUrl}'");
-        }
-        
-        // Если мы сюда передаем чистый hubUrl из MasterServerApiService,
-        // то этот accessTokenForProvider должен быть тем, что реально нужно.
-        // При анонимном входе он должен быть null.
-
-        Debug.Log($"[MasterServerConnection.ConnectAsync] hubUrl for WithUrl: '{cleanHubUrl}', accessTokenForProvider: '{(accessTokenForProvider == null ? "NULL" : accessTokenForProvider)}'");
+        Debug.Log($"[MasterServerConnection.ConnectAsync] hubUrl for WithUrl: '{hubUrl}', accessTokenForProvider: '{(accessTokenForProvider == null ? "NULL" : accessTokenForProvider)}'");
 
         var hubConnectionBuilder = new HubConnectionBuilder()
-        .WithUrl(cleanHubUrl, options => // Используем cleanHubUrl
-        {
-            Debug.Log($"[MasterServerConnection.ConnectAsync WithUrl Options] Configuring options. AccessTokenForProvider is '{(accessTokenForProvider == null ? "NULL" : accessTokenForProvider)}'");
-            // Используем AccessTokenProvider, даже если токен null.
-            // Это может предотвратить добавление библиотекой пустого ?access_token=
-            options.AccessTokenProvider = () => Task.FromResult(accessTokenForProvider);
-        })
-        .WithAutomaticReconnect(); 
+            .WithUrl(hubUrl, options =>
+            {
+                Debug.Log($"[MasterServerConnection.ConnectAsync WithUrl Options] Configuring options. AccessTokenForProvider is '{(accessTokenForProvider == null ? "NULL" : accessTokenForProvider)}'");
+                options.AccessTokenProvider = () => Task.FromResult(accessTokenForProvider);
+            })
+            .WithAutomaticReconnect();
 
         connection = hubConnectionBuilder.Build();
 
@@ -97,17 +42,18 @@ public class MasterServerConnection
         {
             Debug.LogError($"Master Server connection closed: {error?.Message}");
             OnConnectionError?.Invoke(error?.Message ?? "Connection closed");
-            // Можно попробовать реконнект здесь, но WithAutomaticReconnect уже должен это делать
-            // await Task.Delay(new Random().Next(0, 5) * 1000);
-            // await ConnectAsync(hubUrl, accessToken); // Осторожно с рекурсией
         };
 
-        // Подписка на методы, вызываемые сервером (Clients.Caller.SendAsync, Clients.All.SendAsync)
-        // connection.On<GameServerInfoDto>("ReceiveServerStatusUpdate", (serverInfo) =>
-        // {
-        //    OnServerStatusUpdate?.Invoke(serverInfo);
-        // });
-        // connection.On<string>("ReceiveChatMessage", (message) => { /* ... */ });
+        // !!!!! ПОДПИСКА НА СЕРВЕРНЫЕ СОБЫТИЯ ДЛЯ РЕГИСТРАЦИИ И ВЫЗОВ C# СОБЫТИЙ !!!!!
+        connection.On<string>("RegistrationSuccess", (messageFromServer) => {
+            Debug.Log($"[SignalR Event Received] RegistrationSuccess: {messageFromServer}");
+            OnRegistrationSuccess?.Invoke(messageFromServer); // Вызываем наше C# событие
+        });
+        connection.On<List<string>>("RegistrationFailed", (errorsFromServer) => {
+            Debug.LogWarning($"[SignalR Event Received] RegistrationFailed: {string.Join(", ", errorsFromServer)}");
+            OnRegistrationFailed?.Invoke(errorsFromServer); // Вызываем наше C# событие
+        });
+        // !!!!! КОНЕЦ ПОДПИСКИ НА СЕРВЕРНЫЕ СОБЫТИЯ !!!!!
 
         try
         {
@@ -203,6 +149,12 @@ public class MasterServerConnection
     {
         if (connection != null)
         {
+            // Отписываемся от всех серверных обработчиков перед стопом, чтобы избежать ошибок
+            // если соединение уже закрывается или null.
+            // Это более безопасно делать здесь или в DisposeAsync, если бы он был IAsyncDisposable.
+            connection.Remove("RegistrationSuccess"); // Удаляем по имени серверного метода
+            connection.Remove("RegistrationFailed");
+
             await connection.StopAsync();
             await connection.DisposeAsync();
             connection = null;
