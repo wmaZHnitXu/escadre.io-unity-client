@@ -14,6 +14,7 @@ using Vector2 = Core.Primitives.Vector2;
 using Core.Model; 
 using Core.Network.Proxies; 
 using Core.Ocean; 
+using Client.Camera; // Added for camera components
 
 public class ClientComposer : MonoBehaviour
 {
@@ -51,6 +52,12 @@ public class ClientComposer : MonoBehaviour
     [SerializeField]
     private ClientPresentationManager clientPresentationManager;
 
+    [Header("Camera Control")] // New Header for Camera
+    [SerializeField]
+    [Tooltip("Assign the TopDownCameraController (on the CameraRig object) from the scene.")]
+    private TopDownCameraController topDownCameraController;
+
+
     [Header("Debug Info")]
     [SerializeField, ReadOnly] 
     private float currentTime_Display;
@@ -74,6 +81,7 @@ public class ClientComposer : MonoBehaviour
 
     void Awake()
     {
+        Application.targetFrameRate = 120;
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Awake: Initializing Client Logic...");
         thisClientNickname = $"{thisClientNickname}_{thisClientInstanceId}"; 
 
@@ -118,12 +126,40 @@ public class ClientComposer : MonoBehaviour
         
         SetupOceanDebugVisualizer();
         SetupOceanPresentation();
+        SetupCameraInputStrategy(); // New method call
 
         if (clientPresentationManager == null) clientPresentationManager = GetComponent<ClientPresentationManager>();
         if (clientPresentationManager != null) clientPresentationManager.Initialize(_clientLevel); 
         
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Initialization complete. Will attempt connection in OnEnable.");
     }
+
+    private void SetupCameraInputStrategy()
+    {
+        if (topDownCameraController != null)
+        {
+            if (topDownCameraController.mainCamera == null)
+            {
+                Logger.LogError($"[ClientComposer {thisClientInstanceId}] TopDownCameraController's 'mainCamera' field is not assigned. Cannot set input strategy.");
+                return;
+            }
+
+            #if UNITY_STANDALONE || UNITY_EDITOR
+                topDownCameraController.SetInputStrategy(new DesktopCameraInput(topDownCameraController.mainCamera));
+            #elif UNITY_ANDROID || UNITY_IOS
+                topDownCameraController.SetInputStrategy(new MobileCameraInput(topDownCameraController.mainCamera));
+            #else
+                // Fallback or default (e.g., if building for WebGL and want desktop controls)
+                Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Unknown platform for camera input. Defaulting to DesktopCameraInput.");
+                topDownCameraController.SetInputStrategy(new DesktopCameraInput(topDownCameraController.mainCamera));
+            #endif
+        }
+        else
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] TopDownCameraController not assigned in Inspector. Camera manual controls will not be available.");
+        }
+    }
+
 
     private void SetupOceanDebugVisualizer()
     {
@@ -244,20 +280,80 @@ public class ClientComposer : MonoBehaviour
                 {
                     Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] New local EscadreProxy (ID: {escadreProxy.EntityId}) assigned, replacing old one (ID: {LocalEscadreProxy.EntityId}).");
                     UnsubscribeFromLocalEscadreEvents();
+                     if (topDownCameraController != null && topDownCameraController.GetTargetToFollow() != null && topDownCameraController.GetTargetToFollow().name.StartsWith(LocalEscadreProxy.EntityType + "_" + LocalEscadreProxy.EntityId))
+                    {
+                        topDownCameraController.SetTarget(null); // Clear old target if it was the old escadre
+                    }
                 }
                 else if (LocalEscadreProxy != null && LocalEscadreProxy.EntityId == escadreProxy.EntityId)
                 {
-                     return; 
+                     // Already assigned, check if camera target needs refresh if it was null
+                    if (topDownCameraController != null && topDownCameraController.GetTargetToFollow() == null)
+                    {
+                        TrySetCameraTargetToLocalEscadre();
+                    }
+                    return; 
                 }
 
                 LocalEscadreProxy = escadreProxy;
                 localEscadreEntityId_Display = LocalEscadreProxy.EntityId;
                 Logger.Log($"[ClientComposer {thisClientInstanceId}] Local EscadreProxy found and assigned! Entity ID: {LocalEscadreProxy.EntityId}, Owner: {LocalEscadreProxy.OwnerClientId}");
                 SubscribeToLocalEscadreEvents();
+                TrySetCameraTargetToLocalEscadre(); // Set camera to follow this new escadre
                 CheckSessionActivation();
             }
         }
     }
+    
+    private void TrySetCameraTargetToLocalEscadre()
+    {
+        if (LocalEscadreProxy != null && topDownCameraController != null && clientPresentationManager != null)
+        {
+            // We need to find the GameObject presentation of the LocalEscadreProxy
+            // ClientPresentationManager would manage these.
+            // This requires ClientPresentationManager to expose a way to get the GameObject for a proxy.
+            // Let's assume ClientProxyPresentation has a public GameObject property (which it does via .gameObject)
+            // We'd iterate through ClientPresentationManager's active presentations or have it provide a lookup.
+            // For now, let's assume a direct lookup from ClientLevel to its proxy, and then we need to get the Unity GO.
+            // This is where ClientPresentationManager is essential.
+
+            // A simple way (if ClientProxyPresentation is easy to find):
+            var presentationGO = FindPresentationForProxy(LocalEscadreProxy.EntityId);
+            if (presentationGO != null)
+            {
+                topDownCameraController.SetTarget(presentationGO.transform, true); // Immediate follow
+                Logger.Log($"[ClientComposer {thisClientInstanceId}] Camera target set to local escadre: {presentationGO.name}");
+            }
+            else
+            {
+                Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Could not find presentation GameObject for local escadre proxy ID {LocalEscadreProxy.EntityId} to set camera target.");
+            }
+        }
+    }
+
+    // Helper to find the GameObject of a presentation given a proxy ID.
+    // This is a simplified lookup; a robust solution would involve ClientPresentationManager.
+    private GameObject FindPresentationForProxy(int proxyId)
+    {
+        if (clientPresentationManager == null) return null;
+        // This requires ClientPresentationManager to have a way to get the GO.
+        // For now, let's iterate its children if it's the parent.
+        // A better way: ClientProxyPresentation could register itself with ClientPresentationManager.
+        foreach (Transform child in clientPresentationManager.transform) // Or a dedicated parent transform
+        {
+            var cpp = child.GetComponent<ClientProxyPresentation>();
+            if (cpp != null && cpp.TargetProxy != null && cpp.TargetProxy.EntityId == proxyId)
+            {
+                return child.gameObject;
+            }
+        }
+        // Fallback: search all presentations if ClientPresentationManager has a list
+        // This is inefficient and depends on ClientPresentationManager's internal structure.
+        // A better approach is for ClientPresentationManager to provide a direct lookup.
+        // For this example, if the above fails, we return null.
+        return null;
+    }
+
 
     private void HandleLocalEscadreProxyRemoval(IClientProxy proxy)
     {
@@ -265,6 +361,21 @@ public class ClientComposer : MonoBehaviour
         {
             Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Local EscadreProxy (Entity ID: {LocalEscadreProxy.EntityId}) was removed.");
             UnsubscribeFromLocalEscadreEvents();
+
+            if (topDownCameraController != null)
+            {
+                // Check if the camera was following the escadre that got removed
+                var currentTarget = topDownCameraController.GetTargetToFollow();
+                if (currentTarget != null)
+                {
+                    var cpp = currentTarget.GetComponent<ClientProxyPresentation>();
+                    if (cpp != null && cpp.TargetProxy != null && cpp.TargetProxy.EntityId == LocalEscadreProxy.EntityId)
+                    {
+                        topDownCameraController.SetTarget(null); // Clear target
+                        Logger.Log($"[ClientComposer {thisClientInstanceId}] Camera target cleared as local escadre was removed.");
+                    }
+                }
+            }
             LocalEscadreProxy = null;
             localEscadreEntityId_Display = -1;
             isSessionFullyActive = false; 
@@ -321,6 +432,11 @@ public class ClientComposer : MonoBehaviour
         {
             isSessionFullyActive = true; 
             Logger.Log($"[ClientComposer {thisClientInstanceId}] Game session is now FULLY active (local EscadreProxy initialized with shop designs and ocean data received).");
+            // Attempt to set camera target again if it wasn't set due to presentation not being ready
+            if (topDownCameraController != null && topDownCameraController.GetTargetToFollow() == null)
+            {
+                TrySetCameraTargetToLocalEscadre();
+            }
         }
     }
 
@@ -360,7 +476,55 @@ public class ClientComposer : MonoBehaviour
         }
 
         if (_clientLevel != null) _clientLevel.DoUpdate(Time.deltaTime); 
+
+        // Debug: Cycle camera target to next escadre
+        if (Input.GetKeyDown(KeyCode.Tab))
+        {
+            CycleCameraTarget();
+        }
     }
+    
+    private void CycleCameraTarget()
+    {
+        if (topDownCameraController == null || clientPresentationManager == null || !_clientLevel.ActiveProxies.Any())
+        {
+            return;
+        }
+
+        var escadreProxies = _clientLevel.ActiveProxies.Values
+            .OfType<EscadreProxy.ClientProxy>()
+            .OrderBy(ep => ep.EntityId)
+            .ToList();
+
+        if (escadreProxies.Count == 0) return;
+
+        Transform currentTargetTransform = topDownCameraController.GetTargetToFollow();
+        int currentIndex = -1;
+
+        if (currentTargetTransform != null)
+        {
+            var cpp = currentTargetTransform.GetComponent<ClientProxyPresentation>();
+            if (cpp != null && cpp.TargetProxy is EscadreProxy.ClientProxy currentEscadreProxy)
+            {
+                currentIndex = escadreProxies.FindIndex(ep => ep.EntityId == currentEscadreProxy.EntityId);
+            }
+        }
+
+        int nextIndex = (currentIndex + 1) % escadreProxies.Count;
+        EscadreProxy.ClientProxy nextTargetProxy = escadreProxies[nextIndex];
+        
+        GameObject presentationGO = FindPresentationForProxy(nextTargetProxy.EntityId);
+        if (presentationGO != null)
+        {
+            topDownCameraController.SetTarget(presentationGO.transform, false); // Smooth follow
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] Cycled camera target to Escadre ID: {nextTargetProxy.EntityId}");
+        }
+        else
+        {
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Could not find presentation for next Escadre ID: {nextTargetProxy.EntityId} during TAB cycle.");
+        }
+    }
+
 
     void OnDisable()
     {
