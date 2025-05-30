@@ -10,32 +10,35 @@ using Logger = Core.Logging.Logger;
 public class OceanPresentation : MonoBehaviour
 {
     [Header("Mesh Settings")]
-    [SerializeField] private float oceanPlaneSize = 1000f;
+    [SerializeField] public float oceanPlaneSize = 1000f; // This will be the diameter of the circle
     [SerializeField] private int oceanPlaneSegments = 100; // Higher for more detail
+    [SerializeField] private float oceanYLevel = 0f; // The Y level of the ocean plane
 
     private MeshFilter _meshFilter;
     private MeshRenderer _meshRenderer;
-    private Material _oceanMaterial;
-    private Material _originalMaterial; // Keep reference to original for cleanup
-    private bool _usingOriginalMaterial = false; // Track if we're using the original or a copy
+    private Material _oceanMaterialInstance; // Renamed to indicate it's an instance
     private Texture3D _oceanDisplacementTexture;
 
-    private IOceanDataProvider _oceanDataProvider; // For settings
+    private IOceanDataProvider _oceanDataProvider;
     private IClock _clock;
     private bool _isInitialized = false;
+    private float _snapCellSize = 1.0f; // Default, will be calculated
 
     private static readonly int GlobalTimeProperty = Shader.PropertyToID("_GlobalTime");
     private static readonly int OceanTexProperty = Shader.PropertyToID("_OceanTex");
     private static readonly int OceanSettingsParamsProperty = Shader.PropertyToID("_OceanSettingsParams");
     private static readonly int MaxByteToDispUnscaledConstProperty = Shader.PropertyToID("_MaxByteToDispUnscaledConst");
 
+    public float OceanRadius => oceanPlaneSize / 2.0f;
+
     void Awake()
     {
         _meshFilter = GetComponent<MeshFilter>();
         _meshRenderer = GetComponent<MeshRenderer>();
+        transform.position = new Vector3(transform.position.x, oceanYLevel, transform.position.z);
     }
 
-    public void Initialize(IOceanDataProvider dataProvider, IClock clock, byte[] rawTextureBytes, Material oceanMaterial)
+    public void Initialize(IOceanDataProvider dataProvider, IClock clock, byte[] rawTextureBytes, Material oceanSharedMaterial)
     {
         if (dataProvider == null)
         {
@@ -55,9 +58,9 @@ public class OceanPresentation : MonoBehaviour
             enabled = false;
             return;
         }
-        if (oceanMaterial == null)
+        if (oceanSharedMaterial == null)
         {
-            Logger.LogError("[OceanPresentation] Ocean material is null.");
+            Logger.LogError("[OceanPresentation] Ocean shared material is null.");
             enabled = false;
             return;
         }
@@ -66,94 +69,101 @@ public class OceanPresentation : MonoBehaviour
         _clock = clock;
         OceanSettings settings = _oceanDataProvider.Settings;
 
-        _meshFilter.mesh = CreateOceanPlaneMesh(oceanPlaneSize, oceanPlaneSegments);
+        _meshFilter.mesh = CreateCircularOceanMesh(oceanPlaneSize, oceanPlaneSegments);
+        _snapCellSize = oceanPlaneSize / oceanPlaneSegments;
 
         _oceanDisplacementTexture = new Texture3D(
-            settings.TextureResolutionXZ, 
-            settings.TextureResolutionXZ, 
-            settings.TextureResolutionTime, 
-            TextureFormat.RGB24,          
+            settings.TextureResolutionXZ,
+            settings.TextureResolutionXZ,
+            settings.TextureResolutionTime,
+            TextureFormat.RGB24,
             false); // mipChain = false
-        
+
         _oceanDisplacementTexture.wrapMode = TextureWrapMode.Repeat;
         _oceanDisplacementTexture.filterMode = FilterMode.Bilinear;
-        
-        // Correct way to load raw byte data:
-        // Convert byte[] to NativeArray<byte> for SetPixelData
+
         NativeArray<byte> textureDataNative = new NativeArray<byte>(rawTextureBytes, Allocator.Temp);
-        _oceanDisplacementTexture.SetPixelData(textureDataNative, 0); // Mipmap level 0
-        textureDataNative.Dispose(); // Dispose the temporary NativeArray
+        _oceanDisplacementTexture.SetPixelData(textureDataNative, 0);
+        textureDataNative.Dispose();
 
-        _oceanDisplacementTexture.Apply(false, true); // Apply changes, mark as non-readable by CPU
+        _oceanDisplacementTexture.Apply(false, true);
 
-        // Store reference to original material
-        _originalMaterial = oceanMaterial;
+        // Create an instance of the material to avoid modifying the shared asset
+        _oceanMaterialInstance = new Material(oceanSharedMaterial);
+        _meshRenderer.material = _oceanMaterialInstance;
 
-        // In play mode or if it's an asset, use the original material directly for real-time editing
-        // In build or if we need isolation, create a copy
-        #if UNITY_EDITOR
-        if (Application.isPlaying)
-        {
-            // Use original material in play mode for real-time editing
-            _oceanMaterial = oceanMaterial;
-            _usingOriginalMaterial = true;
-            Logger.Log("[OceanPresentation] Using original material for real-time editing in play mode.");
-        }
-        else
-        {
-            // Create copy when not in play mode
-            _oceanMaterial = new Material(oceanMaterial);
-            _usingOriginalMaterial = false;
-        }
-        #else
-        // In builds, always create a copy to avoid modifying assets
-        _oceanMaterial = new Material(oceanMaterial);
-        _usingOriginalMaterial = false;
-        #endif
+        _oceanMaterialInstance.SetTexture(OceanTexProperty, _oceanDisplacementTexture);
 
-        _meshRenderer.material = _oceanMaterial;
-
-        _oceanMaterial.SetTexture(OceanTexProperty, _oceanDisplacementTexture);
-        
-        _oceanMaterial.SetVector(OceanSettingsParamsProperty, new Vector4(
+        _oceanMaterialInstance.SetVector(OceanSettingsParamsProperty, new Vector4(
             settings.DisplacementScale,
             settings.TextureTileWorldSize,
             settings.TextureTimeLoopDuration,
-            settings.TextureResolutionXZ 
+            settings.TextureResolutionXZ
         ));
-        _oceanMaterial.SetFloat(MaxByteToDispUnscaledConstProperty, 2.0f);
+        _oceanMaterialInstance.SetFloat(MaxByteToDispUnscaledConstProperty, 2.0f);
 
         _isInitialized = true;
-        Logger.Log($"[OceanPresentation] Initialized. Ocean Size: {oceanPlaneSize}, Segments: {oceanPlaneSegments}. Texture: {settings.TextureResolutionXZ}x{settings.TextureResolutionXZ}x{settings.TextureResolutionTime}");
+        Logger.Log($"[OceanPresentation] Initialized. Ocean Diameter: {oceanPlaneSize}, Segments: {oceanPlaneSegments}. Texture: {settings.TextureResolutionXZ}x{settings.TextureResolutionXZ}x{settings.TextureResolutionTime}");
     }
+
+    /// <summary>
+    /// Sets the target world position for the ocean presentation to follow, snapping to a grid.
+    /// </summary>
+    public void FollowTarget(Vector3 targetWorldPosition)
+    {
+        if (!_isInitialized) return;
+
+        float snappedX = Mathf.Round(targetWorldPosition.x / _snapCellSize) * _snapCellSize;
+        float snappedZ = Mathf.Round(targetWorldPosition.z / _snapCellSize) * _snapCellSize;
+
+        transform.position = new Vector3(snappedX, oceanYLevel, snappedZ);
+    }
+
 
     void Update()
     {
-        if (!_isInitialized || _oceanMaterial == null || _clock == null)
+        if (!_isInitialized || _oceanMaterialInstance == null || _clock == null)
         {
             return;
         }
-        _oceanMaterial.SetFloat(GlobalTimeProperty, _clock.CurrentTime);
+        _oceanMaterialInstance.SetFloat(GlobalTimeProperty, _clock.CurrentTime);
     }
 
-    private Mesh CreateOceanPlaneMesh(float size, int segments)
+    private Mesh CreateCircularOceanMesh(float diameter, int segments)
     {
         Mesh mesh = new Mesh();
-        mesh.name = "ProceduralOceanPlane";
+        mesh.name = "ProceduralCircularOceanPlane";
 
+        float radius = diameter / 2.0f;
         int vertexCount = (segments + 1) * (segments + 1);
         Vector3[] vertices = new Vector3[vertexCount];
         Vector2[] uv = new Vector2[vertexCount];
         int[] triangles = new int[segments * segments * 6];
 
-        float segmentSize = size / segments;
+        float segmentSize = diameter / segments;
 
         for (int i = 0, z = 0; z <= segments; z++)
         {
             for (int x = 0; x <= segments; x++, i++)
             {
-                // Center the plane at (0,0,0)
-                vertices[i] = new Vector3(x * segmentSize - size * 0.5f, 0, z * segmentSize - size * 0.5f);
+                // Create vertices for a square grid first
+                float vx = x * segmentSize - radius; // Centered coordinates
+                float vz = z * segmentSize - radius; // Centered coordinates
+
+                Vector2 pointOnSquare = new Vector2(vx, vz);
+                float distFromCenter = pointOnSquare.magnitude;
+
+                if (distFromCenter > radius)
+                {
+                    // Push vertex onto the circle's edge if it's outside
+                    Vector2 dir = pointOnSquare.normalized;
+                    vertices[i] = new Vector3(dir.x * radius, 0, dir.y * radius);
+                }
+                else
+                {
+                    vertices[i] = new Vector3(vx, 0, vz);
+                }
+                // UVs are mapped as if it's a full square, texture will be clipped by mesh shape
                 uv[i] = new Vector2((float)x / segments, (float)z / segments);
             }
         }
@@ -175,9 +185,10 @@ public class OceanPresentation : MonoBehaviour
         mesh.vertices = vertices;
         mesh.uv = uv;
         mesh.triangles = triangles;
-        mesh.RecalculateBounds(); 
-        // Normals are calculated in the shader
-        
+        mesh.RecalculateBounds();
+        // Normals are calculated in the shader or can be recalculated if needed (mesh.RecalculateNormals())
+        // For a flat plane intended for shader displacement, custom normals might not be critical here.
+
         return mesh;
     }
 
@@ -188,18 +199,16 @@ public class OceanPresentation : MonoBehaviour
             Destroy(_oceanDisplacementTexture);
             _oceanDisplacementTexture = null;
         }
-        
-        // Only destroy the material if we created a copy
-        if (_oceanMaterial != null && !_usingOriginalMaterial)
+
+        if (_oceanMaterialInstance != null)
         {
-            Destroy(_oceanMaterial);
+            Destroy(_oceanMaterialInstance); // Always destroy the instance
         }
-        _oceanMaterial = null;
-        _originalMaterial = null;
-        
-        if (_meshFilter != null && _meshFilter.sharedMesh != null && _meshFilter.sharedMesh.name == "ProceduralOceanPlane")
+        _oceanMaterialInstance = null;
+
+        if (_meshFilter != null && _meshFilter.sharedMesh != null && _meshFilter.sharedMesh.name == "ProceduralCircularOceanPlane")
         {
-            Destroy(_meshFilter.sharedMesh); 
+            Destroy(_meshFilter.sharedMesh);
         }
         _isInitialized = false;
     }

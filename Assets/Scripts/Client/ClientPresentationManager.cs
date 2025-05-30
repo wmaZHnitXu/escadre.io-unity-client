@@ -7,15 +7,16 @@ using Core.Network;     // For IClientProxy
 using Core.Model;       // For Entity.EntityTypeEnum
 using Core.Logging;
 using Logger = Core.Logging.Logger;
+using System.Linq;
 
 public class ClientPresentationManager : MonoBehaviour
 {
     [Serializable]
     public struct ProxyFactoryEntry
     {
-        public Entity.EntityTypeEnum EntityType; 
+        public Entity.EntityTypeEnum EntityType;
         public GameObject PresentationPrefab;
-        public ClientProxyPresentationFactory Factory; 
+        public ClientProxyPresentationFactory Factory;
     }
 
     [Header("Configuration")]
@@ -28,6 +29,7 @@ public class ClientPresentationManager : MonoBehaviour
 
     private ClientLevel _clientLevel;
     private Dictionary<Entity.EntityTypeEnum, ProxyFactoryEntry> _entryLookup = new Dictionary<Entity.EntityTypeEnum, ProxyFactoryEntry>();
+    private Dictionary<int, ClientProxyPresentation> _activePresentations = new Dictionary<int, ClientProxyPresentation>(); // To track active presentations
     private bool _isInitialized = false;
 
     public void Initialize(ClientLevel clientLevel)
@@ -77,6 +79,12 @@ public class ClientPresentationManager : MonoBehaviour
     private void HandleProxyAddedToClientLevel(IClientProxy proxy)
     {
         if (!_isInitialized || proxy == null) return;
+        if (_activePresentations.ContainsKey(proxy.EntityId)) // Already have a presentation for this proxy
+        {
+            Logger.LogWarning($"[ClientPresentationManager] Proxy Added (ID: {proxy.EntityId}), but a presentation already exists. This might indicate a re-creation or an issue.");
+            return;
+        }
+
 
         if (_entryLookup.TryGetValue(proxy.EntityType, out ProxyFactoryEntry factoryEntry))
         {
@@ -88,6 +96,8 @@ public class ClientPresentationManager : MonoBehaviour
                 {
                     presentation.transform.SetParent(presentationParent, false);
                 }
+                _activePresentations[proxy.EntityId] = presentation; // Track active presentation
+                presentation.PresentationDisposedEvent += HandlePresentationDisposed; // Subscribe to its disposal
             }
             else
             {
@@ -103,7 +113,22 @@ public class ClientPresentationManager : MonoBehaviour
     private void HandleProxyRemovedFromClientLevel(IClientProxy proxy)
     {
         if (!_isInitialized || proxy == null) return;
-        Logger.Log($"[ClientPresentationManager] Proxy Removed (ID: {proxy.EntityId}, Type: {proxy.EntityType}). Presentation should self-dispose via proxy events.");
+        // Logger.Log($"[ClientPresentationManager] Proxy Removed (ID: {proxy.EntityId}, Type: {proxy.EntityType}). Presentation should self-dispose via proxy events.");
+        // The presentation will be removed from _activePresentations when its PresentationDisposedEvent fires.
+        // If the presentation was already destroyed or never created, this is fine.
+    }
+    
+    private void HandlePresentationDisposed(ClientProxyPresentation presentation)
+    {
+        if (presentation == null || presentation.TargetProxy == null) return;
+
+        if (_activePresentations.ContainsKey(presentation.TargetProxy.EntityId))
+        {
+            _activePresentations.Remove(presentation.TargetProxy.EntityId);
+            // Logger.Log($"[ClientPresentationManager] Presentation for Proxy ID {presentation.TargetProxy.EntityId} was disposed and removed from tracking.");
+        }
+        // Unsubscribe to prevent memory leaks, though ClientProxyPresentation should also clear its own event.
+        presentation.PresentationDisposedEvent -= HandlePresentationDisposed;
     }
 
     private void OnDestroy()
@@ -114,6 +139,18 @@ public class ClientPresentationManager : MonoBehaviour
             _clientLevel.OnProxyAdded -= HandleProxyAddedToClientLevel;
             _clientLevel.OnProxyRemoved -= HandleProxyRemovedFromClientLevel;
         }
+        
+        // Dispose any remaining active presentations
+        foreach(var presentation in _activePresentations.Values.ToList()) // ToList to allow modification
+        {
+            if(presentation != null)
+            {
+                 // This will trigger the HandlePresentationDisposed through the event if factory pooling is used.
+                 // If not pooled or if directly destroying, it will at least clean up the GameObject.
+                if (presentation.gameObject != null) Destroy(presentation.gameObject);
+            }
+        }
+        _activePresentations.Clear();
         _entryLookup.Clear();
         _isInitialized = false;
         Logger.Log("[ClientPresentationManager] Cleanup complete.");
