@@ -4,7 +4,7 @@ using Core.Model;
 using Logger = Core.Logging.Logger;
 // Removed Vector3 and Quaternion using alias as they are clear from context or full Core.Primitives path is used.
 
-public class DefaultShipDebugBehaviour : ModelEntityDebugBehaviour
+public class DefaultShipDebugBehaviour : DestructibleEntityDebugBehaviour
 {
     [Header("DefaultShip Specific")]
     [SerializeField, ReadOnly] protected float currentSpeed;
