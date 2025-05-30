@@ -11,6 +11,7 @@ public class MasterServerApiService : MonoBehaviour
     private MasterServerConnection connection;
     public string MasterServerUrl = "http://localhost:5076/masterhub"; // Укажите ваш URL
     private TaskCompletionSource<(bool success, RegistrationResultDto response, string errorMessage)> _registrationTcs;
+    private TaskCompletionSource<(bool success, LoginResponseDto response, string errorMessage)> _loginTcs;
 
     private bool isRefreshingToken = false; // Флаг, чтобы избежать одновременных запросов на обновление токена
 
@@ -26,6 +27,8 @@ public class MasterServerApiService : MonoBehaviour
             // Подписка на события регистрации из MasterServerConnection
             connection.OnRegistrationSuccess += HandleRegistrationSuccess;
             connection.OnRegistrationFailed += HandleRegistrationFailed;
+            connection.OnLoginSuccess += HandleLoginSuccess;
+            connection.OnLoginFailed += HandleLoginFailed;
         }
         else
         {
@@ -125,6 +128,17 @@ public class MasterServerApiService : MonoBehaviour
             Errors = errors?.ToArray() // Преобразуем List<string> в string[]
         };
         _registrationTcs.TrySetResult((false, resultDto, string.Join("; ", errors ?? new List<string>())));
+    }
+    private void HandleLoginSuccess(LoginResponseDto loginResponse)
+    {
+        if (_loginTcs == null || _loginTcs.Task.IsCompleted) return;
+        _loginTcs.TrySetResult((true, loginResponse, null));
+    }
+
+    private void HandleLoginFailed(string errorMessage)
+    {
+        if (_loginTcs == null || _loginTcs.Task.IsCompleted) return;
+        _loginTcs.TrySetResult((false, null, errorMessage));
     }
     // --- Логика обновления токена ---
     private async Task<bool> TryRefreshTokenAsync()
@@ -323,33 +337,67 @@ public class MasterServerApiService : MonoBehaviour
         }
     }
 
-    public async Task<(bool success, LoginResponseDto response, string errorMessage)> LoginAsync(string email, string password)
+   public async Task<(bool success, LoginResponseDto response, string errorMessage)> LoginAsync(string identifier, string password) // изменил email на identifier для универсальности
     {
         await EnsureConnectedAsync(forceDisconnect: true); // Логин - без предыдущего токена
-        if (!connection.IsConnected) return (false, null, "Failed to connect to server for login.");
-
-        var requestDto = new LoginRequestDto { Identifier = email, Password = password };
-        var result = await connection.InvokeHubMethodAsync<LoginResponseDto>("Login", requestDto);
-
-        if (result.success && result.response != null && !string.IsNullOrEmpty(result.response.AccessToken) && SessionManager.Instance != null)
+        if (!connection.IsConnected) 
         {
-            Debug.Log("Login successful, creating session.");
-            UserSessionData userData = new UserSessionData {
-                // Предполагаем, что LoginResponseDto содержит UserId и Nickname
-                // Если нет, их нужно получить из другого источника или оставить null
-                UserId = result.response.UserId, // Убедитесь, что это поле есть в вашем LoginResponseDto
-                Nickname = result.response.Nickname ?? email.Split('@')[0], // Предполагаем вложенный UserInfoDto или берем из email
-                Email = email
-            };
-            SessionManager.Instance.CreateSession(
-                result.response.AccessToken,
-                result.response.AccessTokenExpiration,
-                result.response.NewRefreshToken,
-                userData
-            );
-            await EnsureConnectedAsync(SessionManager.Instance.AccessToken, forceDisconnect: true); // Переподключаемся с новым токеном
+            return (false, null, "Failed to connect to server for login.");
         }
-        return result;
+
+        _loginTcs = new TaskCompletionSource<(bool success, LoginResponseDto response, string errorMessage)>();
+        
+        var requestDto = new LoginRequestDto { Identifier = identifier, Password = password };
+        Debug.Log($"[LoginAsync] Attempting to login with Identifier: '{identifier}'");
+
+        // Используем SendHubMethodAsync, так как серверный Login не возвращает Task<T>
+        var (sendSuccess, sendError) = await connection.SendHubMethodAsync("Login", requestDto);
+
+        if (!sendSuccess)
+        {
+            // Если сам вызов SendAsync провалился
+            return (false, null, sendError ?? "Failed to send login request.");
+        }
+
+        // Ожидаем результат из HandleLoginSuccess или HandleLoginFailed
+        try
+        {
+            var completedTask = await Task.WhenAny(_loginTcs.Task, Task.Delay(TimeSpan.FromSeconds(15))); // Таймаут 15 секунд
+            if (completedTask == _loginTcs.Task)
+            {
+                var result = await _loginTcs.Task; // Получаем результат от TCS
+
+                // Логика создания сессии, если логин успешен
+                if (result.success && result.response != null && !string.IsNullOrEmpty(result.response.AccessToken) && SessionManager.Instance != null)
+                {
+                    Debug.Log("Login successful, creating session.");
+                    UserSessionData userData = new UserSessionData {
+                        UserId = result.response.UserId,
+                        Nickname = result.response.Nickname, // Nickname должен приходить от сервера в LoginResponseDto
+                        Email = (identifier.Contains("@") ? identifier : SessionManager.Instance.CurrentUser?.Email) // Пытаемся определить Email
+                    };
+                    SessionManager.Instance.CreateSession(
+                        result.response.AccessToken,
+                        result.response.AccessTokenExpiration,
+                        result.response.RefreshToken, // Используем RefreshToken из ответа
+                        userData
+                    );
+                    await EnsureConnectedAsync(SessionManager.Instance.AccessToken, forceDisconnect: true); // Переподключаемся с новым токеном
+                }
+                return result;
+            }
+            else
+            {
+                Debug.LogError("Login request timed out.");
+                _loginTcs.TrySetCanceled();
+                return (false, null, "Login request timed out.");
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            Debug.LogWarning("Login task was cancelled.");
+            return (false, null, "Login request cancelled.");
+        }
     }
 
     public async Task<(bool success, PasswordResetRequestResultDto response, string errorMessage)> RequestPasswordResetAsync(string email)
@@ -402,8 +450,12 @@ public class MasterServerApiService : MonoBehaviour
             connection.OnConnectionError -= HandleConnectionError; // Если вы его еще где-то используете
             connection.OnRegistrationSuccess -= HandleRegistrationSuccess;
             connection.OnRegistrationFailed -= HandleRegistrationFailed;
+            connection.OnLoginSuccess -= HandleLoginSuccess;
+            connection.OnLoginFailed -= HandleLoginFailed;
             // Отписка от других событий, если они есть
         }
+
+        _loginTcs?.TrySetCanceled();
         // Если _registrationTcs может остаться "висеть" при уничтожении объекта, его стоит отменить
         _registrationTcs?.TrySetCanceled();
     }

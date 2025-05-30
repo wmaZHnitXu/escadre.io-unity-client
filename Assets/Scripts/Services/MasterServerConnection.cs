@@ -16,6 +16,8 @@ public class MasterServerConnection
     // !!!!! ОБЪЯВЛЕНИЕ СОБЫТИЙ ДЛЯ РЕГИСТРАЦИИ !!!!!
     public event Action<string> OnRegistrationSuccess;      // Для успешной регистрации (сообщение от сервера)
     public event Action<List<string>> OnRegistrationFailed; // Для неуспешной регистрации (список ошибок от сервера)
+    public event Action<LoginResponseDto> OnLoginSuccess;
+    public event Action<string> OnLoginFailed;
     // !!!!! КОНЕЦ ОБЪЯВЛЕНИЯ СОБЫТИЙ !!!!!
 
     public async Task ConnectAsync(string hubUrl, string accessTokenForProvider = null)
@@ -52,6 +54,14 @@ public class MasterServerConnection
         connection.On<List<string>>("RegistrationFailed", (errorsFromServer) => {
             Debug.LogWarning($"[SignalR Event Received] RegistrationFailed: {string.Join(", ", errorsFromServer)}");
             OnRegistrationFailed?.Invoke(errorsFromServer); // Вызываем наше C# событие
+        });
+        connection.On<LoginResponseDto>("LoginSuccess", (loginResponse) => {
+        Debug.Log($"[SignalR Event Received] LoginSuccess. UserId: {loginResponse?.UserId}");
+        OnLoginSuccess?.Invoke(loginResponse);
+        });
+        connection.On<string>("LoginFailed", (errorMessage) => {
+            Debug.LogWarning($"[SignalR Event Received] LoginFailed: {errorMessage}");
+            OnLoginFailed?.Invoke(errorMessage);
         });
         // !!!!! КОНЕЦ ПОДПИСКИ НА СЕРВЕРНЫЕ СОБЫТИЯ !!!!!
 
@@ -154,7 +164,8 @@ public class MasterServerConnection
             // Это более безопасно делать здесь или в DisposeAsync, если бы он был IAsyncDisposable.
             connection.Remove("RegistrationSuccess"); // Удаляем по имени серверного метода
             connection.Remove("RegistrationFailed");
-
+            connection.Remove("LoginSuccess");
+            connection.Remove("LoginFailed");
             await connection.StopAsync();
             await connection.DisposeAsync();
             connection = null;
