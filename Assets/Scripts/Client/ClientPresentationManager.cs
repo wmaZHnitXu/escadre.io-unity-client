@@ -79,7 +79,7 @@ public class ClientPresentationManager : MonoBehaviour
     private void HandleProxyAddedToClientLevel(IClientProxy proxy)
     {
         if (!_isInitialized || proxy == null) return;
-        if (_activePresentations.ContainsKey(proxy.EntityId)) // Already have a presentation for this proxy
+        if (_activePresentations.ContainsKey(proxy.EntityId)) 
         {
             Logger.LogWarning($"[ClientPresentationManager] Proxy Added (ID: {proxy.EntityId}), but a presentation already exists. This might indicate a re-creation or an issue.");
             return;
@@ -96,8 +96,8 @@ public class ClientPresentationManager : MonoBehaviour
                 {
                     presentation.transform.SetParent(presentationParent, false);
                 }
-                _activePresentations[proxy.EntityId] = presentation; // Track active presentation
-                presentation.PresentationDisposedEvent += HandlePresentationDisposed; // Subscribe to its disposal
+                _activePresentations[proxy.EntityId] = presentation; 
+                presentation.PresentationDisposedEvent += HandlePresentationDisposed; 
             }
             else
             {
@@ -113,9 +113,8 @@ public class ClientPresentationManager : MonoBehaviour
     private void HandleProxyRemovedFromClientLevel(IClientProxy proxy)
     {
         if (!_isInitialized || proxy == null) return;
-        // Logger.Log($"[ClientPresentationManager] Proxy Removed (ID: {proxy.EntityId}, Type: {proxy.EntityType}). Presentation should self-dispose via proxy events.");
-        // The presentation will be removed from _activePresentations when its PresentationDisposedEvent fires.
-        // If the presentation was already destroyed or never created, this is fine.
+        // The presentation will be removed from _activePresentations when its PresentationDisposedEvent fires,
+        // which is triggered by the proxy's OnDestroyed event (handled in ClientProxyPresentation.HandleProxyDestroyed).
     }
     
     private void HandlePresentationDisposed(ClientProxyPresentation presentation)
@@ -127,7 +126,6 @@ public class ClientPresentationManager : MonoBehaviour
             _activePresentations.Remove(presentation.TargetProxy.EntityId);
             // Logger.Log($"[ClientPresentationManager] Presentation for Proxy ID {presentation.TargetProxy.EntityId} was disposed and removed from tracking.");
         }
-        // Unsubscribe to prevent memory leaks, though ClientProxyPresentation should also clear its own event.
         presentation.PresentationDisposedEvent -= HandlePresentationDisposed;
     }
 
@@ -140,14 +138,14 @@ public class ClientPresentationManager : MonoBehaviour
             _clientLevel.OnProxyRemoved -= HandleProxyRemovedFromClientLevel;
         }
         
-        // Dispose any remaining active presentations
-        foreach(var presentation in _activePresentations.Values.ToList()) // ToList to allow modification
+        foreach(var presentation in _activePresentations.Values.ToList()) 
         {
             if(presentation != null)
             {
-                 // This will trigger the HandlePresentationDisposed through the event if factory pooling is used.
-                 // If not pooled or if directly destroying, it will at least clean up the GameObject.
-                if (presentation.gameObject != null) Destroy(presentation.gameObject);
+                // Directly calling DisposePresentation ensures cleanup logic in ClientProxyPresentation runs.
+                // If it's pooled, it will go back to the pool. If not, it should destroy itself.
+                presentation.SendMessage("DisposePresentation", SendMessageOptions.DontRequireReceiver); // Call DisposePresentation
+                if (presentation.gameObject != null) Destroy(presentation.gameObject); // Fallback destroy if not pooled/self-destroyed
             }
         }
         _activePresentations.Clear();

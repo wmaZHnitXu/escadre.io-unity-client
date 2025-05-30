@@ -1,10 +1,10 @@
 // File: Scripts/Client/Presentations/EscadrePresentation.cs
 using UnityEngine;
 using Core.Network.Proxies;
-using Core.Model; // For FormationSlot if needed for debug
-using TMPro; // If using TextMeshPro for UI
+using Core.Model; 
+using TMPro; 
 using Logger = Core.Logging.Logger;
-using System.Linq; // For Linq operations on FormationSlots
+using System.Linq; 
 
 public class EscadrePresentation : ClientProxyPresentation
 {
@@ -12,8 +12,7 @@ public class EscadrePresentation : ClientProxyPresentation
     [SerializeField] private TextMeshProUGUI nicknameText;
     [SerializeField] private TextMeshProUGUI resourcesText;
     [SerializeField] private TextMeshProUGUI shipCountText;
-    // TODO: Add references for formation slot visualizations if needed
-
+    
     private EscadreProxy.ClientProxy _escadreProxy;
 
     protected override void OnInitialized()
@@ -30,23 +29,21 @@ public class EscadrePresentation : ClientProxyPresentation
         _escadreProxy.OnNicknameChanged += UpdateNicknameDisplay;
         _escadreProxy.OnResourcesChanged += UpdateResourcesDisplay;
         _escadreProxy.OnFormationChanged += UpdateFormationDisplay;
-        // Optional: _escadreProxy.OnShopDesignsChanged += HandleShopDesignsChanged;
+        // Example: if shop designs were important for this presentation
+        // _escadreProxy.OnShopDesignsChanged += UpdateShopDesignsDisplay;
 
-        // Initial UI Update
+
         UpdateNicknameDisplay();
         UpdateResourcesDisplay();
         UpdateFormationDisplay();
+        // UpdateShopDesignsDisplay(); // If applicable
 
-        // Set GameObject scale or other general escadre visual properties
-        // For an Escadre, which is more of an abstract anchor, its visual might be simple (e.g., a flag or just a conceptual point)
-        // Or it could have a specific model representing the "flagship" concept if desired.
-        // For now, we'll assume it's mainly a point in space that its ships follow.
-        // If this presentation had a distinct model, you'd configure it here.
+        // Escadre visual might be a flag or simple marker.
+        // Its position is the average of its ships, managed by ClientProxyPresentation's Update().
         var mainRenderer = GetComponent<Renderer>();
         if (mainRenderer != null)
         {
-            // Example: Make escadre anchor slightly visible
-            mainRenderer.material.color = new Color(0.2f, 0.8f, 0.2f, 0.5f); // Greenish, semi-transparent
+            mainRenderer.material.color = new Color(0.1f, 0.6f, 0.1f, 0.7f); // Darker Green
         }
     }
 
@@ -57,7 +54,6 @@ public class EscadrePresentation : ClientProxyPresentation
         {
             nicknameText.text = $"Escadre: {_escadreProxy.Nickname ?? "N/A"} (ID: {_escadreProxy.EntityId})";
         }
-        // Logger.Log($"[EscadrePresentation {gameObject.name}] Nickname updated: {_escadreProxy.Nickname}");
     }
 
     private void UpdateResourcesDisplay()
@@ -67,7 +63,6 @@ public class EscadrePresentation : ClientProxyPresentation
         {
             resourcesText.text = $"Resources: {_escadreProxy.Resources}";
         }
-        // Logger.Log($"[EscadrePresentation {gameObject.name}] Resources updated: {_escadreProxy.Resources}");
     }
 
     private void UpdateFormationDisplay()
@@ -78,21 +73,21 @@ public class EscadrePresentation : ClientProxyPresentation
         {
             shipCountText.text = $"Ships: {currentShipCount}";
         }
-        // Logger.Log($"[EscadrePresentation {gameObject.name}] Formation updated. Ship count: {currentShipCount}");
 
-        // TODO: More complex formation visualization
-        // - Instantiate/position ship placeholder GameObjects based on FormationSlots
-        // - Or draw Gizmos for slot positions relative to this EscadrePresentation's transform
+        // More complex formation visualization could be done here if needed,
+        // e.g., drawing Gizmos for slot positions relative to this EscadrePresentation's transform.
     }
+
+    // Example for shop designs if relevant to this presentation
+    // private void UpdateShopDesignsDisplay() { ... }
 
     protected override void HandleLoudDestruction()
     {
         base.HandleLoudDestruction();
-        // Example: Play a sound or a general "escadre defeated" effect
         Logger.Log($"[EscadrePresentation {gameObject.name}] Escadre ID {_escadreProxy?.EntityId} loud destruction signaled.");
         if (nicknameText != null) nicknameText.text = "DEFEATED";
-        if (resourcesText != null) resourcesText.text = "";
-        if (shipCountText != null) shipCountText.text = "";
+        if (resourcesText != null) resourcesText.text = "---";
+        if (shipCountText != null) shipCountText.text = "---";
     }
 
     protected override void UnsubscribeFromProxyEvents()
@@ -103,24 +98,34 @@ public class EscadrePresentation : ClientProxyPresentation
             _escadreProxy.OnNicknameChanged -= UpdateNicknameDisplay;
             _escadreProxy.OnResourcesChanged -= UpdateResourcesDisplay;
             _escadreProxy.OnFormationChanged -= UpdateFormationDisplay;
-            // _escadreProxy.OnShopDesignsChanged -= HandleShopDesignsChanged;
+            // _escadreProxy.OnShopDesignsChanged -= UpdateShopDesignsDisplay;
         }
     }
 
-    // Optional Gizmos for debugging formation slots
+    // Optional Gizmos for debugging formation slots relative to the Escadre's average position
     void OnDrawGizmosSelected()
     {
-        if (_escadreProxy != null && TargetProxy != null) // Check if target proxy exists even if not fully initialized for drawing
+        if (_escadreProxy != null && TargetProxy != null && Application.isPlaying) // Ensure proxy is valid and game is running
         {
             Gizmos.color = Color.green;
+            // The Escadre's transform.position is already the average of its ships.
+            // The _escadreProxy.FormationSlots offsets are relative to the *commanded fleet target point*.
+            // To visualize them relative to the *current average position* (this.transform.position),
+            // we need to consider the Escadre's current orientation (_escadreProxy.Rotation),
+            // which itself is oriented towards the commanded target point.
+            
+            // So, these Gizmos will show where the formation slots *would be* if the fleet's
+            // center (this.transform.position) was the command target point, oriented by this.transform.rotation.
+            // This is a reasonable way to visualize the intended local formation.
+            
             foreach (var slot in _escadreProxy.FormationSlots)
             {
-                // Convert slot's 2D relative offset to a 3D world offset from the escadre's current orientation
                 Vector3 localOffset3D = new Vector3(slot.RelativeOffset.X, 0, slot.RelativeOffset.Y);
-                Vector3 worldOffset = transform.rotation * localOffset3D; // Use presentation's transform as base
-                Vector3 slotWorldPosition = transform.position + worldOffset;
+                // Apply the Escadre's current rotation (which reflects its commanded orientation)
+                Vector3 worldOffset = _escadreProxy.Rotation.ToUnityQuaternion() * localOffset3D; 
+                Vector3 slotWorldPosition = transform.position + worldOffset; // Relative to current Escadre average position
                 
-                Gizmos.DrawSphere(slotWorldPosition, 0.3f); // Draw a small sphere for each slot
+                Gizmos.DrawSphere(slotWorldPosition, 0.3f); 
                 if (slot.ShipEntityId.HasValue)
                 {
                     #if UNITY_EDITOR
