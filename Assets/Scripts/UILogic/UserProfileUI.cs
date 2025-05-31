@@ -32,7 +32,7 @@ public class UserProfileUI : UIScreen
         statsButton?.onClick.AddListener(OnStatsButtonClicked);
         logoutButton?.onClick.AddListener(OnLogoutButtonClicked);
         playButton?.onClick.AddListener(OnPlayButtonClicked);
-        loginMethodDropdown?.onValueChanged.AddListener(OnLoginMethodChanged);
+        loginMethodDropdown?.onValueChanged.AddListener(OnLoginMethodChanged    );
         // serverDropdown?.onValueChanged.AddListener(OnServerSelected);
     }
 
@@ -43,6 +43,7 @@ public class UserProfileUI : UIScreen
         UpdateUserInfo();
         InitializeLoginMethodDropdown();
         // FetchAndDisplayServerList(); // Если нужен список серверов
+        SetUIInteractable(true);
     }
 
     private void UpdateUserInfo()
@@ -59,8 +60,8 @@ public class UserProfileUI : UIScreen
 
     private void OnStatsButtonClicked()
     {
-        Debug.Log("Stats button clicked. (Not implemented)");
-        // uiManager.SwitchToScreen(UIScreenType.PlayerStats);
+        Debug.Log("Stats button clicked. Switching to PlayerStats screen.");
+        uiManager.SwitchToScreen(UIScreenType.PlayerStats);
     }
 
     private async void OnLogoutButtonClicked()
@@ -100,10 +101,8 @@ public class UserProfileUI : UIScreen
 
     private void OnPlayButtonClicked()
     {
-        Debug.Log("Play button clicked. (Not implemented)");
-        // string selectedServerId = GetSelectedServerId();
-        // TODO: Логика начала игры, подключения к серверу и т.д.
-        // gameManager.StartGame(selectedServerId);
+        Debug.Log($"Login successful! User: {SessionManager.Instance?.CurrentUser?.Nickname}");
+        uiManager.SwitchToScreen(UIScreenType.GameUI); // Или UIScreenType.MainMenu
     }
     
     private void InitializeLoginMethodDropdown()
@@ -177,6 +176,7 @@ public class UserProfileUI : UIScreen
         if (statsButton != null) statsButton.interactable = interactable;
         if (logoutButton != null) logoutButton.interactable = interactable;
         if (playButton != null) playButton.interactable = interactable;
+        Debug.Log($"Play button interactable state set to: {interactable}");
         if (loginMethodDropdown != null) loginMethodDropdown.interactable = interactable;
         if (serverDropdown != null) serverDropdown.interactable = interactable;
         if (canvasGroup != null) canvasGroup.interactable = interactable;

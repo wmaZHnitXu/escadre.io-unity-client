@@ -17,6 +17,7 @@ namespace Assets.Scripts.UILogic
         PasswordResetEmailSent,   // Скриншот 2: Письмо для сброса пароля отправлено (с таймером)
         EnterNewPassword,         // Скриншот 3: Ввод нового пароля после подтверждения сброса
         AccountNotFound, 
+        PlayerStats 
     }
 }
 

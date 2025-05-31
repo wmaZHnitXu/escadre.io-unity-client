@@ -16,14 +16,12 @@ public class RegistrationUI : UIScreen
     [SerializeField] private Button registerActionButton;
 
     private UIManager uiManager;
-    // private MasterServerService masterServerService; // Старое имя, у вас используется MasterServerApiService
-    private MasterServerApiService masterServerApiService; // Правильное имя сервиса
+    private MasterServerApiService masterServerApiService;
 
     protected override void Awake()
     {
         base.Awake();
         uiManager = FindObjectOfType<UIManager>();
-        // masterServerService = FindObjectOfType<MasterServerService>(); // Старое имя
         masterServerApiService = MasterServerApiService.Instance; // Используем Singleton Instance
         if (masterServerApiService == null)
         {

@@ -5,6 +5,9 @@ using System;
 using System.Threading.Tasks;
 using UnityEngine; // Для Debug.Log
 using System.Collections.Generic; 
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+
 
 public class MasterServerConnection
 {
@@ -18,6 +21,9 @@ public class MasterServerConnection
     public event Action<List<string>> OnRegistrationFailed; // Для неуспешной регистрации (список ошибок от сервера)
     public event Action<LoginResponseDto> OnLoginSuccess;
     public event Action<string> OnLoginFailed;
+    public event Action<string> OnPasswordResetRequested;
+    public event Action<string> OnPasswordResetSuccess;
+    public event Action<string> OnPasswordResetFailed; // Сервер шлет одну строку ошибки
     // !!!!! КОНЕЦ ОБЪЯВЛЕНИЯ СОБЫТИЙ !!!!!
 
     public async Task ConnectAsync(string hubUrl, string accessTokenForProvider = null)
@@ -37,6 +43,17 @@ public class MasterServerConnection
                 options.AccessTokenProvider = () => Task.FromResult(accessTokenForProvider);
             })
             .WithAutomaticReconnect();
+
+        // !!!!! НАСТРОЙКА JSON ПРОТОКОЛА КЛИЕНТА !!!!!
+        hubConnectionBuilder.AddJsonProtocol(options =>
+        {
+            // Эти опции будут использоваться для СЕРИАЛИЗАЦИИ запросов клиента и ДЕСЕРИАЛИЗАЦИИ ответов сервера
+            options.PayloadSerializerOptions.PropertyNameCaseInsensitive = true; 
+            // По умолчанию клиентская библиотека УЖЕ должна использовать PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            // для отправляемых данных. А PropertyNameCaseInsensitive = true поможет при приеме.
+            // options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase; // Можно явно указать, если есть сомнения
+        });
+        // !!!!! КОНЕЦ НАСТРОЙКИ JSON ПРОТОКОЛА !!!!!
 
         connection = hubConnectionBuilder.Build();
 
@@ -62,6 +79,18 @@ public class MasterServerConnection
         connection.On<string>("LoginFailed", (errorMessage) => {
             Debug.LogWarning($"[SignalR Event Received] LoginFailed: {errorMessage}");
             OnLoginFailed?.Invoke(errorMessage);
+        });
+        connection.On<string>("PasswordResetRequested", (serverMessage) => {
+        Debug.Log($"[SignalR Event Received] PasswordResetRequested: {serverMessage}");
+        OnPasswordResetRequested?.Invoke(serverMessage);
+        });
+        connection.On<string>("PasswordResetSuccess", (serverMessage) => {
+            Debug.Log($"[SignalR Event Received] PasswordResetSuccess: {serverMessage}");
+            OnPasswordResetSuccess?.Invoke(serverMessage);
+        });
+        connection.On<string>("PasswordResetFailed", (serverErrorMessage) => {
+            Debug.LogWarning($"[SignalR Event Received] PasswordResetFailed: {serverErrorMessage}");
+            OnPasswordResetFailed?.Invoke(serverErrorMessage);
         });
         // !!!!! КОНЕЦ ПОДПИСКИ НА СЕРВЕРНЫЕ СОБЫТИЯ !!!!!
 
@@ -154,7 +183,6 @@ public class MasterServerConnection
         }
     }
 
-
     public async Task DisconnectAsync()
     {
         if (connection != null)
@@ -166,6 +194,9 @@ public class MasterServerConnection
             connection.Remove("RegistrationFailed");
             connection.Remove("LoginSuccess");
             connection.Remove("LoginFailed");
+            connection.Remove("PasswordResetRequested");
+            connection.Remove("PasswordResetSuccess");
+            connection.Remove("PasswordResetFailed");
             await connection.StopAsync();
             await connection.DisposeAsync();
             connection = null;

@@ -13,7 +13,7 @@ public class PasswordResetEmailSentUI : UIScreen
     [SerializeField] private TMP_Text resendButtonText; // Текст на кнопке "Отправить ещё раз (1:05)"
 
     private UIManager uiManager;
-    private MasterServerService masterServerService; // Для повторной отправки
+    private MasterServerApiService masterServerApiService;
 
     private float resendCooldown = 65f; // 1 минута 5 секунд = 65 секунд
     private float currentCooldown;
@@ -24,7 +24,11 @@ public class PasswordResetEmailSentUI : UIScreen
     {
         base.Awake();
         uiManager = FindObjectOfType<UIManager>();
-        masterServerService = FindObjectOfType<MasterServerService>();
+        masterServerApiService = MasterServerApiService.Instance;
+        if (masterServerApiService == null)
+        {
+            Debug.LogError($"{this.GetType().Name}: MasterServerApiService.Instance is null!");
+        }
     }
 
     private void Start()
@@ -71,28 +75,20 @@ public class PasswordResetEmailSentUI : UIScreen
 
     private async void OnResendButtonClicked()
     {
-        if (string.IsNullOrEmpty(userEmailForResend) || !resendButton.interactable) return;
+        var (success, response, errorMessage) = await masterServerApiService.RequestPasswordResetAsync(userEmailForResend);
+        // TODO: uiManager.ShowLoadingScreen(false);
 
-        Debug.Log($"Resending password reset email to: {userEmailForResend}");
-        // TODO: Вызвать masterServerService.RequestPasswordResetAsync(userEmailForResend);
-        // Заглушка
-        resendButton.interactable = false; // Блокируем кнопку на время запроса
-        // Тут может быть небольшой индикатор загрузки на самой кнопке
-
-        await System.Threading.Tasks.Task.Delay(1000); // Имитация запроса
-        bool mockResendSuccess = true; // Имитация
-
-        if (mockResendSuccess)
+        if (success && response != null && response.IsSuccess)
         {
-            Debug.Log("Password reset email resent successfully (mock).");
-            StartResendTimer(); // Перезапускаем таймер
+            Debug.Log($"Password reset email resent successfully to {userEmailForResend}. Server message: {response.Error}");
+            StartResendTimer();
             // TODO: Показать пользователю сообщение "Письмо отправлено повторно"
         }
         else
         {
-            Debug.LogError("Failed to resend password reset email (mock).");
+            Debug.LogError($"Failed to resend password reset email: {errorMessage}");
             // TODO: Показать ошибку
-            resendButton.interactable = true; // Разблокируем, если ошибка
+            resendButton.interactable = true; // Разблокируем, если ошибка, чтобы можно было попробовать еще раз после кулдауна (таймер не перезапускаем)
         }
     }
 

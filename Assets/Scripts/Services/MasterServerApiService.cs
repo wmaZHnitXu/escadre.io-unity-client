@@ -12,6 +12,8 @@ public class MasterServerApiService : MonoBehaviour
     public string MasterServerUrl = "http://localhost:5076/masterhub"; // Укажите ваш URL
     private TaskCompletionSource<(bool success, RegistrationResultDto response, string errorMessage)> _registrationTcs;
     private TaskCompletionSource<(bool success, LoginResponseDto response, string errorMessage)> _loginTcs;
+    private TaskCompletionSource<(bool success, PasswordResetRequestResultDto response, string errorMessage)> _passwordResetRequestTcs;
+    private TaskCompletionSource<(bool success, PasswordResetResultDto response, string errorMessage)> _passwordResetTcs;
 
     private bool isRefreshingToken = false; // Флаг, чтобы избежать одновременных запросов на обновление токена
 
@@ -24,11 +26,16 @@ public class MasterServerApiService : MonoBehaviour
             connection = new MasterServerConnection();
             connection.OnConnectionError += HandleConnectionError;
 
-            // Подписка на события регистрации из MasterServerConnection
             connection.OnRegistrationSuccess += HandleRegistrationSuccess;
             connection.OnRegistrationFailed += HandleRegistrationFailed;
+
             connection.OnLoginSuccess += HandleLoginSuccess;
             connection.OnLoginFailed += HandleLoginFailed;
+
+            // Подписка на новые события
+            connection.OnPasswordResetRequested += HandlePasswordResetRequested; // Имя события от сервера, как в MasterHub
+            connection.OnPasswordResetSuccess += HandlePasswordResetSuccess;
+            connection.OnPasswordResetFailed += HandlePasswordResetFailed;
         }
         else
         {
@@ -94,7 +101,6 @@ public class MasterServerApiService : MonoBehaviour
         }
         Debug.Log($"[EnsureConnectedAsync EXIT] IsConnected: {connection.IsConnected}");
     }
-
     private void HandleConnectionError(string errorMessage)
     {
         Debug.LogError($"MasterServerApiService: Connection Error: {errorMessage}");
@@ -134,7 +140,28 @@ public class MasterServerApiService : MonoBehaviour
         if (_loginTcs == null || _loginTcs.Task.IsCompleted) return;
         _loginTcs.TrySetResult((true, loginResponse, null));
     }
-
+    private void HandlePasswordResetRequested(string serverMessage) // Сервер для "PasswordResetRequested" шлет только сообщение
+    {
+        if (_passwordResetRequestTcs == null || _passwordResetRequestTcs.Task.IsCompleted) return;
+        // PasswordResetRequestResultDto на клиенте для этого случая может быть простым
+        var resultDto = new PasswordResetRequestResultDto { IsSuccess = true, Error = serverMessage };
+        _passwordResetRequestTcs.TrySetResult((true, resultDto, serverMessage));
+    }
+    // Обработчики для ResetPassword
+    private void HandlePasswordResetSuccess(string serverMessage) // Сервер для "PasswordResetSuccess" шлет сообщение
+    {
+        if (_passwordResetTcs == null || _passwordResetTcs.Task.IsCompleted) return;
+        var resultDto = new PasswordResetResultDto { IsSuccess = true, Error = null, Errors = null }; // Message можно взять из serverMessage
+        _passwordResetTcs.TrySetResult((true, resultDto, serverMessage));
+    }
+    private void HandlePasswordResetFailed(string serverErrorMessage) // Сервер для "PasswordResetFailed" шлет сообщение об ошибке
+    {
+        if (_passwordResetTcs == null || _passwordResetTcs.Task.IsCompleted) return;
+        // Предполагаем, что serverErrorMessage - это одна строка ошибки или несколько, объединенных.
+        // Если сервер шлет IEnumerable<string> ошибок, то List<string> и здесь.
+        var resultDto = new PasswordResetResultDto { IsSuccess = false, Error = serverErrorMessage, Errors = new[] { serverErrorMessage } };
+        _passwordResetTcs.TrySetResult((false, resultDto, serverErrorMessage));
+    }
     private void HandleLoginFailed(string errorMessage)
     {
         if (_loginTcs == null || _loginTcs.Task.IsCompleted) return;
@@ -232,7 +259,33 @@ public class MasterServerApiService : MonoBehaviour
 
         return await connection.InvokeHubMethodAsync<T>(methodName, args);
     }
-     private async Task<(bool success, string errorMessage)> SendAuthorizedHubMethodAsync(string methodName, params object[] args)
+    private async Task<(bool success, T response, string errorMessage)> InvokeAuthorizedHubMethodAsync<T>(string methodName) // БЕЗ params object[] args
+    {
+        if (SessionManager.Instance == null)
+            return (false, default(T), "SessionManager not available.");
+
+        if (SessionManager.Instance.IsAccessTokenExpiredOrNearingExpiration())
+        {
+            bool refreshed = await TryRefreshTokenAsync();
+            if (!refreshed && !SessionManager.Instance.IsUserLoggedIn)
+            {
+                return (false, default(T), "Session expired or token refresh failed. Please login again.");
+            }
+        }
+        await EnsureConnectedAsync(SessionManager.Instance.AccessToken);
+
+        if (!connection.IsConnected) return (false, default(T), "Not connected to server for authorized call.");
+        if (!SessionManager.Instance.IsUserLoggedIn) // Убрал проверку methodName != "GetAnonymousToken", т.к. это общий авторизованный метод
+        {
+            Debug.LogWarning($"Attempting to call authorized method '{methodName}' while not logged in.");
+            return (false, default(T), "User not logged in.");
+        }
+
+        Debug.Log($"[InvokeAuthorizedHubMethodAsync - NO PARAMS] Calling {methodName}.");
+        // Используем перегрузку InvokeHubMethodAsync из MasterServerConnection, которая не принимает args
+        return await connection.InvokeHubMethodAsync<T>(methodName); 
+    }
+    private async Task<(bool success, string errorMessage)> SendAuthorizedHubMethodAsync(string methodName, params object[] args)
     {
         if (SessionManager.Instance == null)
             return (false, "SessionManager not available.");
@@ -337,7 +390,7 @@ public class MasterServerApiService : MonoBehaviour
         }
     }
 
-   public async Task<(bool success, LoginResponseDto response, string errorMessage)> LoginAsync(string identifier, string password) // изменил email на identifier для универсальности
+    public async Task<(bool success, LoginResponseDto response, string errorMessage)> LoginAsync(string identifier, string password) // изменил email на identifier для универсальности
     {
         await EnsureConnectedAsync(forceDisconnect: true); // Логин - без предыдущего токена
         if (!connection.IsConnected) 
@@ -402,18 +455,76 @@ public class MasterServerApiService : MonoBehaviour
 
     public async Task<(bool success, PasswordResetRequestResultDto response, string errorMessage)> RequestPasswordResetAsync(string email)
     {
-        await EnsureConnectedAsync(forceDisconnect:true); // Запрос на сброс - без токена
-        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
+        await EnsureConnectedAsync(forceDisconnect: true);
+        if (!connection.IsConnected)
+        {
+            return (false, new PasswordResetRequestResultDto { IsSuccess = false, Error = "Connection failed." }, "Failed to connect to server.");
+        }
+
+        _passwordResetRequestTcs = new TaskCompletionSource<(bool success, PasswordResetRequestResultDto response, string errorMessage)>();
         
-        return await connection.InvokeHubMethodAsync<PasswordResetRequestResultDto>("RequestPasswordReset", email);
+        // На сервере RequestPasswordReset принимает просто string email
+        var (sendSuccess, sendError) = await connection.SendHubMethodAsync("RequestPasswordReset", email);
+
+        if (!sendSuccess)
+        {
+            return (false, new PasswordResetRequestResultDto { IsSuccess = false, Error = sendError ?? "Failed to send request." }, sendError ?? "Failed to send password reset request.");
+        }
+
+        try // Добавляем try-catch с таймаутом
+        {
+            var completedTask = await Task.WhenAny(_passwordResetRequestTcs.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+            if (completedTask == _passwordResetRequestTcs.Task)
+            {
+                return await _passwordResetRequestTcs.Task;
+            }
+            else
+            {
+                _passwordResetRequestTcs.TrySetCanceled();
+                return (false, new PasswordResetRequestResultDto { IsSuccess = false, Error = "Request timed out." }, "Password reset request timed out.");
+            }
+        }
+        catch(TaskCanceledException)
+        {
+            return (false, new PasswordResetRequestResultDto { IsSuccess = false, Error = "Request cancelled." }, "Password reset request cancelled.");
+        }
     }
 
     public async Task<(bool success, PasswordResetResultDto response, string errorMessage)> ResetPasswordAsync(string userId, string token, string newPassword)
     {
-        await EnsureConnectedAsync(forceDisconnect:true); // Сброс - без токена
-        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
+        await EnsureConnectedAsync(forceDisconnect: true);
+        if (!connection.IsConnected)
+        {
+            return (false, new PasswordResetResultDto { IsSuccess = false, Error = "Connection failed." }, "Failed to connect to server.");
+        }
+
+        _passwordResetTcs = new TaskCompletionSource<(bool success, PasswordResetResultDto response, string errorMessage)>();
         
-        return await connection.InvokeHubMethodAsync<PasswordResetResultDto>("ResetPassword", userId, token, newPassword);
+        // На сервере ResetPassword принимает userId, code, newPassword
+        var (sendSuccess, sendError) = await connection.SendHubMethodAsync("ResetPassword", userId, token, newPassword);
+
+        if (!sendSuccess)
+        {
+            return (false, new PasswordResetResultDto { IsSuccess = false, Error = sendError ?? "Failed to send request." }, sendError ?? "Failed to send password reset actual request.");
+        }
+        
+        try // Добавляем try-catch с таймаутом
+        {
+            var completedTask = await Task.WhenAny(_passwordResetTcs.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+            if (completedTask == _passwordResetTcs.Task)
+            {
+                return await _passwordResetTcs.Task;
+            }
+            else
+            {
+                _passwordResetTcs.TrySetCanceled();
+                return (false, new PasswordResetResultDto { IsSuccess = false, Error = "Request timed out." }, "Password reset actual request timed out.");
+            }
+        }
+        catch(TaskCanceledException)
+        {
+            return (false, new PasswordResetResultDto { IsSuccess = false, Error = "Request cancelled." }, "Password reset actual request cancelled.");
+        }
     }
 
     public async Task<(bool success, List<GameServerInfoDto> response, string errorMessage)> GetServerListAsync()
@@ -436,6 +547,11 @@ public class MasterServerApiService : MonoBehaviour
         return result; // Возвращаем результат операции с сервером
     }
 
+    public async Task<(bool success, PlayerStatsDto response, string errorMessage)> GetMyStatsAsync()
+    {
+        // Этот метод требует авторизации, поэтому используем InvokeAuthorizedHubMethodAsync
+        return await InvokeAuthorizedHubMethodAsync<PlayerStatsDto>("GetMyStats");
+    }
     private async void OnApplicationQuit()
     {
         if (connection != null && connection.IsConnected)
@@ -452,6 +568,9 @@ public class MasterServerApiService : MonoBehaviour
             connection.OnRegistrationFailed -= HandleRegistrationFailed;
             connection.OnLoginSuccess -= HandleLoginSuccess;
             connection.OnLoginFailed -= HandleLoginFailed;
+            connection.OnPasswordResetRequested -= HandlePasswordResetRequested;
+            connection.OnPasswordResetSuccess -= HandlePasswordResetSuccess;
+            connection.OnPasswordResetFailed -= HandlePasswordResetFailed;
             // Отписка от других событий, если они есть
         }
 

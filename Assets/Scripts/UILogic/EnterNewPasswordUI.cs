@@ -8,10 +8,12 @@ public class EnterNewPasswordUI : UIScreen
 {
     [SerializeField] private TMP_InputField newPasswordInputField;
     [SerializeField] private TMP_InputField confirmNewPasswordInputField;
+    [SerializeField] private TMP_InputField userIdInputField;
+    [SerializeField] private TMP_InputField tokenInputField;
     [SerializeField] private Button saveNewPasswordButton;
 
     private UIManager uiManager;
-    private MasterServerService masterServerService;
+    private MasterServerApiService masterServerApiService;
     private string userIdForPasswordReset; // ID пользователя, для которого сбрасывается пароль
     private string resetToken; // Токен сброса пароля
 
@@ -19,7 +21,11 @@ public class EnterNewPasswordUI : UIScreen
     {
         base.Awake();
         uiManager = FindObjectOfType<UIManager>();
-        masterServerService = FindObjectOfType<MasterServerService>();
+        masterServerApiService = MasterServerApiService.Instance;
+        if (masterServerApiService == null)
+        {
+            Debug.LogError($"{this.GetType().Name}: MasterServerApiService.Instance is null!");
+        }
     }
 
     private void Start()
@@ -46,9 +52,12 @@ public class EnterNewPasswordUI : UIScreen
     private async void OnSaveNewPasswordClicked()
     {
         string newPassword = newPasswordInputField.text;
-        string confirmPassword = confirmNewPasswordInputField.text;
+        string confirmPassword = confirmNewPasswordInputField.text; // Вы уже считывали его для валидации
 
-        // TODO: Валидация (непустые, совпадение, сложность пароля)
+        string userId = userIdInputField.text; // Предполагаем, что userIdInputField существует
+        string token = tokenInputField.text;   // Предполагаем, что tokenInputField существует
+
+        // Ваша валидация (оставляем ее как есть)
         if (string.IsNullOrWhiteSpace(newPassword) || string.IsNullOrWhiteSpace(confirmPassword))
         {
             Debug.LogError("Password fields cannot be empty.");
@@ -61,32 +70,55 @@ public class EnterNewPasswordUI : UIScreen
             // TODO: Показать ошибку
             return;
         }
-        if (string.IsNullOrEmpty(userIdForPasswordReset) || string.IsNullOrEmpty(resetToken))
+        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(token)) // Изменил userIdForPasswordReset на userId, tokenForReset на token
         {
             Debug.LogError("User ID or Reset Token is missing. Cannot reset password.");
             // TODO: Показать критическую ошибку, возможно, вернуть на логин
             uiManager.SwitchToScreen(UIScreenType.RegisteredLogin);
             return;
         }
+        
+        // TODO: Добавить валидацию сложности пароля, если требуется
 
-        Debug.Log($"Attempting to set new password for UserID: {userIdForPasswordReset}");
-        // TODO: Вызвать masterServerService.ResetPasswordAsync(userIdForPasswordReset, resetToken, newPassword);
-        // Заглушка:
+        Debug.Log($"Attempting to set new password for UserID: {userId}");
         SetInteractable(false);
-        await System.Threading.Tasks.Task.Delay(1000);
+        // TODO: uiManager.ShowLoadingScreen(true); // Если будете реализовывать
 
-        bool mockResetSuccess = true; // Имитация
-        if (mockResetSuccess)
+        var (success, response, errorMessage) = await masterServerApiService.ResetPasswordAsync(userId, token, newPassword);
+        // TODO: uiManager.ShowLoadingScreen(false);
+
+        if (success && response != null && response.IsSuccess)
         {
-            Debug.Log("Password has been successfully reset (mock). Switching to login screen.");
-            // TODO: Показать сообщение об успехе, затем переключить
+            Debug.Log("Password has been successfully reset. Switching to login screen.");
+            // TODO: Показать сообщение об успехе (например, "Пароль успешно изменен!")
             uiManager.SwitchToScreen(UIScreenType.RegisteredLogin);
         }
         else
         {
-            Debug.LogError("Failed to reset password (mock).");
-            // TODO: Показать ошибку
-            SetInteractable(true);
+            string errorToDisplay = errorMessage;
+            // Проверяем ошибки из DTO, если они есть
+            if (response?.Errors != null && response.Errors.Length > 0)
+            {
+                errorToDisplay = string.Join("\n", response.Errors);
+            }
+            else if (!string.IsNullOrEmpty(response?.Error)) // response?.Error - это одиночная строка ошибки из DTO
+            {
+                errorToDisplay = response.Error;
+            }
+            // Если в DTO ошибок нет, но errorMessage (от TCS) есть, используем его
+            else if (string.IsNullOrEmpty(errorToDisplay) && !string.IsNullOrEmpty(errorMessage))
+            {
+                errorToDisplay = errorMessage;
+            }
+            // Если совсем ничего нет, общее сообщение
+            else if (string.IsNullOrEmpty(errorToDisplay))
+            {
+                errorToDisplay = "Failed to reset password due to an unknown error.";
+            }
+
+            Debug.LogError($"Failed to reset password: {errorToDisplay}");
+            // TODO: Показать пользователю errorToDisplay
+            // SetInteractable(true); // Уже сделано выше
         }
     }
     

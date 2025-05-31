@@ -17,6 +17,7 @@ public class UIManager : MonoBehaviour
     [SerializeField] private PasswordResetEmailSentUI passwordResetEmailSentScreen;
     [SerializeField] private EnterNewPasswordUI enterNewPasswordScreen;
     [SerializeField] private AccountNotFoundUI accountNotFoundScreen;
+    [SerializeField] private PlayerStatsUI playerStatsScreen;
 
     private UIScreen currentVisibleScreen; // Используем UIScreen
 
@@ -65,6 +66,7 @@ public class UIManager : MonoBehaviour
         if (passwordResetEmailSentScreen != null) passwordResetEmailSentScreen.Hide(true);
         if (enterNewPasswordScreen != null) enterNewPasswordScreen.Hide(true);
         if (accountNotFoundScreen != null) accountNotFoundScreen.Hide(true);
+        if (playerStatsScreen != null) playerStatsScreen.Hide(true);
     }
 
     public void SwitchToScreen(UIScreenType screenType, bool hideInstantly = false, Action onSwitched = null)
@@ -118,6 +120,8 @@ public class UIManager : MonoBehaviour
             case UIScreenType.PasswordResetEmailSent: return passwordResetEmailSentScreen;
             case UIScreenType.EnterNewPassword: return enterNewPasswordScreen;
             case UIScreenType.AccountNotFound: return accountNotFoundScreen;
+            case UIScreenType.PlayerStats: return playerStatsScreen;
+            
             default:
                 Debug.LogError($"No screen configured for UIScreenType: {screenType}");
                 return null;

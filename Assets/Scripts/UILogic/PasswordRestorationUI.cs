@@ -12,13 +12,17 @@ public class PasswordRestorationUI : UIScreen
     [SerializeField] private Button sendButton;
 
     private UIManager uiManager;
-    private MasterServerService masterServerService; // Для отправки запроса на сброс
+    private MasterServerApiService masterServerApiService;
 
     protected override void Awake()
     {
         base.Awake();
         uiManager = FindObjectOfType<UIManager>();
-        masterServerService = FindObjectOfType<MasterServerService>();
+        masterServerApiService = MasterServerApiService.Instance;
+        if (masterServerApiService == null)
+        {
+            Debug.LogError($"{this.GetType().Name}: MasterServerApiService.Instance is null!");
+        }
     }
 
     private void Start()
@@ -46,52 +50,25 @@ public class PasswordRestorationUI : UIScreen
 
         Debug.Log($"Requesting password reset for Email='{email}'");
         SetInteractable(false);
+        var (success, response, errorMessage) = await masterServerApiService.RequestPasswordResetAsync(email);
+        SetInteractable(true); // Разблокируем UI после ответа
+        // TODO: uiManager.ShowLoadingScreen(false);
 
-        // TODO: Вызвать masterServerService.RequestPasswordResetAsync(email);
-        // В реальном сервисе этот метод должен вернуть результат, указывающий,
-        // был ли найден аккаунт и отправлено ли письмо.
-        // (результат типа PasswordResetRequestResult из вашего саммари по мастер-серверу)
-
-        // ЗАГЛУШКА:
-        await System.Threading.Tasks.Task.Delay(1000);
-        // Имитируем разные ответы сервера
-        // string testEmail = "exists@example.com";
-        // string testEmailNotFound = "notexists@example.com";
-
-        bool mockAccountExists = (email != "notfound@example.com"); // Имитация
-        bool mockEmailSentSuccessfully = true; // Предположим, если аккаунт есть, письмо отправляется
-
-        if (mockAccountExists)
+        if (success && response != null && response.IsSuccess) // Сервер всегда возвращает "успех" здесь
         {
-            if (mockEmailSentSuccessfully)
+            Debug.Log($"Password reset request processed for {email}. Server message: {response.Error}. Switching to PasswordResetEmailSent screen.");
+            PasswordResetEmailSentUI passwordResetScreen = uiManager.GetScreenByType(UIScreenType.PasswordResetEmailSent) as PasswordResetEmailSentUI;
+            if (passwordResetScreen != null)
             {
-                Debug.Log("Account found and password reset email sent (mock). Switching to PasswordResetEmailSent screen.");
-                // Получаем экземпляр экрана PasswordResetEmailSentUI, чтобы передать email
-                PasswordResetEmailSentUI passwordResetScreen = uiManager.GetScreenByType(UIScreenType.PasswordResetEmailSent) as PasswordResetEmailSentUI;
-                if (passwordResetScreen != null)
-                {
-                    passwordResetScreen.SetUserEmail(email); // Передаем email на следующий экран
-                }
-                uiManager.SwitchToScreen(UIScreenType.PasswordResetEmailSent);
+                passwordResetScreen.SetUserEmail(email);
             }
-            else
-            {
-                 Debug.LogError("Account found, but failed to send password reset email (mock).");
-                // TODO: Показать ошибку (например, "Не удалось отправить письмо, попробуйте позже")
-                SetInteractable(true);
-            }
+            uiManager.SwitchToScreen(UIScreenType.PasswordResetEmailSent);
         }
-        else // Аккаунт не найден
+        else
         {
-            Debug.Log("Account not found (mock). Switching to AccountNotFound screen.");
-            AccountNotFoundUI notFoundScreen = uiManager.GetScreenByType(UIScreenType.AccountNotFound) as AccountNotFoundUI;
-            if (notFoundScreen != null)
-            {
-                notFoundScreen.SetMissingEmail(email);
-            }
-            uiManager.SwitchToScreen(UIScreenType.AccountNotFound);
+            Debug.LogError($"Password reset request call failed: {errorMessage}");
+            // TODO: Показать ошибку пользователю (например, "Не удалось отправить запрос. Проверьте соединение.")
         }
-        // SetInteractable(true); // Если не было перехода, разблокировать
     }
 
     private void SetInteractable(bool state)
