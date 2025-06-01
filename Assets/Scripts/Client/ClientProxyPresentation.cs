@@ -13,7 +13,7 @@ public abstract class ClientProxyPresentation : MonoBehaviour
     public delegate void OnPresentationDisposedDelegate(ClientProxyPresentation presentation); // Changed delegate name for clarity
     public event OnPresentationDisposedDelegate PresentationDisposedEvent;
     
-    private bool _isInitialized = false;
+    protected bool _isInitialized = false;
 
     [Header("Visual Interpolation")]
     public float PositionInterpolationSpeed = 15f;

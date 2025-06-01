@@ -30,7 +30,7 @@ namespace Client.Camera
         // Percentage of screen (from center to edge) that is the dead zone.
         // 0.0 = no dead zone, panning starts from center.
         // 0.8 = dead zone is 80% of half-screen, active zone is outer 20%.
-        public float ScreenEdgeDeadZoneNormalized { get; set; } = 0.5f; // e.g., 70% from center is dead zone
+        public float ScreenEdgeDeadZoneNormalized { get; set; } = 1.0f; // e.g., 70% from center is dead zone
 
         private Plane _panningPlane;
 
