@@ -3,6 +3,7 @@ using UnityEngine;
 using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using Assets.Scripts.UILogic;
 
 public class MasterServerApiService : MonoBehaviour
 {
@@ -16,9 +17,11 @@ public class MasterServerApiService : MonoBehaviour
     private TaskCompletionSource<(bool success, PasswordResetResultDto response, string errorMessage)> _passwordResetTcs;
 
     private bool isRefreshingToken = false; // Флаг, чтобы избежать одновременных запросов на обновление токена
-
+    private UIManager uiManager;
     private void Awake()
     {
+        uiManager = UIManager.Instance; 
+
         if (Instance == null)
         {
             Instance = this;
@@ -55,7 +58,6 @@ public class MasterServerApiService : MonoBehaviour
         {
             await EnsureConnectedAsync(); // Обычное подключение без токена
         }
-        Debug.LogWarning("[MasterServerApiService.Start] Automatic connection on start is TEMPORARILY DISABLED for debugging.");
     }
 
     private async Task EnsureConnectedAsync(string accessTokenToUse = null, bool forceDisconnect = false)
@@ -140,6 +142,11 @@ public class MasterServerApiService : MonoBehaviour
         if (_loginTcs == null || _loginTcs.Task.IsCompleted) return;
         _loginTcs.TrySetResult((true, loginResponse, null));
     }
+    private void HandleLoginFailed(string errorMessage)
+    {
+        if (_loginTcs == null || _loginTcs.Task.IsCompleted) return;
+        _loginTcs.TrySetResult((false, null, errorMessage));
+    }
     private void HandlePasswordResetRequested(string serverMessage) // Сервер для "PasswordResetRequested" шлет только сообщение
     {
         if (_passwordResetRequestTcs == null || _passwordResetRequestTcs.Task.IsCompleted) return;
@@ -147,7 +154,6 @@ public class MasterServerApiService : MonoBehaviour
         var resultDto = new PasswordResetRequestResultDto { IsSuccess = true, Error = serverMessage };
         _passwordResetRequestTcs.TrySetResult((true, resultDto, serverMessage));
     }
-    // Обработчики для ResetPassword
     private void HandlePasswordResetSuccess(string serverMessage) // Сервер для "PasswordResetSuccess" шлет сообщение
     {
         if (_passwordResetTcs == null || _passwordResetTcs.Task.IsCompleted) return;
@@ -162,11 +168,7 @@ public class MasterServerApiService : MonoBehaviour
         var resultDto = new PasswordResetResultDto { IsSuccess = false, Error = serverErrorMessage, Errors = new[] { serverErrorMessage } };
         _passwordResetTcs.TrySetResult((false, resultDto, serverErrorMessage));
     }
-    private void HandleLoginFailed(string errorMessage)
-    {
-        if (_loginTcs == null || _loginTcs.Task.IsCompleted) return;
-        _loginTcs.TrySetResult((false, null, errorMessage));
-    }
+    
     // --- Логика обновления токена ---
     private async Task<bool> TryRefreshTokenAsync()
     {
@@ -223,8 +225,8 @@ public class MasterServerApiService : MonoBehaviour
             Debug.LogError($"Failed to refresh token: {error}. Clearing session.");
             SessionManager.Instance.ClearSession(); // Если не удалось обновить, разлогиниваем
             await EnsureConnectedAsync(forceDisconnect: true); // Переподключаемся без токена
-            // TODO: Перенаправить на экран логина
-            // UIManager.Instance.SwitchToScreen(UIScreenType.RegisteredLogin);
+
+            uiManager.SwitchToScreen(UIScreenType.RegisteredLogin);
             isRefreshingToken = false;
             return false;
         }
@@ -309,9 +311,7 @@ public class MasterServerApiService : MonoBehaviour
         return await connection.SendHubMethodAsync(methodName, args);
     }
 
-
     // --- Методы API ---
-
     public async Task<(bool success, TokenResponseDto response, string errorMessage)> GetAnonymousTokenAsync(string nickname)
     {
         await EnsureConnectedAsync(); 
@@ -528,7 +528,8 @@ public class MasterServerApiService : MonoBehaviour
     }
 
     public async Task<(bool success, List<GameServerInfoDto> response, string errorMessage)> GetServerListAsync()
-    {
+    {   
+        // TODO
         // Используем обертку для авторизованных вызовов
         return await InvokeAuthorizedHubMethodAsync<List<GameServerInfoDto>>("GetServerList");
     }
@@ -552,6 +553,8 @@ public class MasterServerApiService : MonoBehaviour
         // Этот метод требует авторизации, поэтому используем InvokeAuthorizedHubMethodAsync
         return await InvokeAuthorizedHubMethodAsync<PlayerStatsDto>("GetMyStats");
     }
+
+    // --- Прочее ---
     private async void OnApplicationQuit()
     {
         if (connection != null && connection.IsConnected)
@@ -578,31 +581,4 @@ public class MasterServerApiService : MonoBehaviour
         // Если _registrationTcs может остаться "висеть" при уничтожении объекта, его стоит отменить
         _registrationTcs?.TrySetCanceled();
     }
-
-
 }
-
-
-// Не забудьте DTO для RefreshTokenRequestDto:
-// public class RefreshTokenRequestDto { public string RefreshToken { get; set; } }
-
-// Убедитесь, что LoginResponseDto содержит UserId и, возможно, вложенный UserInfoDto с Nickname,
-// если вы хотите это сохранять в UserSessionData при логине.
-// public class LoginResponseDto : TokenResponseDto
-// {
-//     public string UserId { get; set; } // Пример
-//     public UserInfoDto User { get; set; } // Пример
-// }
-// public class UserInfoDto { public string Nickname { get; set; } /* ... */ }
-
-// Убедитесь, что все эти DTO определены в вашем проекте Unity (папка Scripts/DTOs):
-// - AnonymousTokenRequestDto
-// - RegisterRequestDto
-// - LoginRequestDto
-// - TokenResponseDto
-// - LoginResponseDto (может наследоваться от TokenResponseDto)
-// - GameServerInfoDto
-// - RegistrationResultDto
-// - PasswordResetRequestResultDto
-// - PasswordResetResultDto
-// - (AuthResultDto, EmailConfirmationResultDto - если понадобятся для других методов)

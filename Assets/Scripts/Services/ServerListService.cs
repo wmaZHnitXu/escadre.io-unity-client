@@ -3,7 +3,7 @@ using UnityEngine;
 using System.Threading.Tasks; // Для async/await
 using System.Collections.Generic;
 
-
+// TODO: заглушка
 public class ServerListService : MonoBehaviour
 {
     public async Task<(bool success, List<GameServerInfoDto> servers, string errorMessage)> GetServerListAsync()

@@ -1,19 +1,17 @@
 // Scripts/Services/MasterServerConnection.cs
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client; // Проверьте правильность using для вашего пакета
+using Microsoft.AspNetCore.SignalR.Client;
 using System;
 using System.Threading.Tasks;
-using UnityEngine; // Для Debug.Log
+using UnityEngine;
 using System.Collections.Generic; 
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-
 
 public class MasterServerConnection
 {
     private HubConnection connection;
     public bool IsConnected => connection?.State == HubConnectionState.Connected;
-
     public event Action<string> OnConnectionError;
 
     // !!!!! ОБЪЯВЛЕНИЕ СОБЫТИЙ ДЛЯ РЕГИСТРАЦИИ !!!!!
@@ -66,11 +64,11 @@ public class MasterServerConnection
         // !!!!! ПОДПИСКА НА СЕРВЕРНЫЕ СОБЫТИЯ ДЛЯ РЕГИСТРАЦИИ И ВЫЗОВ C# СОБЫТИЙ !!!!!
         connection.On<string>("RegistrationSuccess", (messageFromServer) => {
             Debug.Log($"[SignalR Event Received] RegistrationSuccess: {messageFromServer}");
-            OnRegistrationSuccess?.Invoke(messageFromServer); // Вызываем наше C# событие
+            OnRegistrationSuccess?.Invoke(messageFromServer);
         });
         connection.On<List<string>>("RegistrationFailed", (errorsFromServer) => {
             Debug.LogWarning($"[SignalR Event Received] RegistrationFailed: {string.Join(", ", errorsFromServer)}");
-            OnRegistrationFailed?.Invoke(errorsFromServer); // Вызываем наше C# событие
+            OnRegistrationFailed?.Invoke(errorsFromServer);
         });
         connection.On<LoginResponseDto>("LoginSuccess", (loginResponse) => {
         Debug.Log($"[SignalR Event Received] LoginSuccess. UserId: {loginResponse?.UserId}");
@@ -197,6 +195,7 @@ public class MasterServerConnection
             connection.Remove("PasswordResetRequested");
             connection.Remove("PasswordResetSuccess");
             connection.Remove("PasswordResetFailed");
+            
             await connection.StopAsync();
             await connection.DisposeAsync();
             connection = null;
