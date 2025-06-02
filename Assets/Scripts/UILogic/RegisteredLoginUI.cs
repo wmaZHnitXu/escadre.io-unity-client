@@ -40,8 +40,7 @@ public class RegisteredLoginUI : UIScreen
     {
         base.OnShow();
         Debug.Log("Registered Login Screen Shown.");
-        emailInputField.text = ""; // Очищаем поля при показе
-        passwordInputField.text = "";
+        
 
         if (loginMethodDropdown != null)
         {
@@ -55,6 +54,11 @@ public class RegisteredLoginUI : UIScreen
             }
         }
         // PopulateServerDropdown(); // Если нужен список серверов
+    }
+    private void ClearInputFields() // Новый вспомогательный метод
+    {
+        emailInputField.text = ""; // Очищаем поля при показе
+        passwordInputField.text = "";
     }
 
     private async void OnLoginButtonClicked()
@@ -81,13 +85,14 @@ public class RegisteredLoginUI : UIScreen
         {
             // SessionManager уже должен был обновиться внутри MasterServerApiService.LoginAsync
             Debug.Log($"Login successful! User: {SessionManager.Instance?.CurrentUser?.Nickname}, Token: {SessionManager.Instance?.AccessToken?.Substring(0, 10)}...");
+            ClearInputFields();
             uiManager.SwitchToScreen(UIScreenType.UserProfileUI); // Или UIScreenType.MainMenu
         }
         else
         {
             Debug.LogError($"Login failed: {errorMessage}");
-            // TODO: Показать пользователю errorMessage
-            // errorDisplay.Show($"Ошибка входа: {errorMessage}");
+            UIManager.Instance.ShowErrorScreen("Ошибка Входа", errorMessage, null, UIScreenType.RegisteredLogin);
+            SetUIInteractable(true);
         }
 
         SetUIInteractable(true);
@@ -96,11 +101,13 @@ public class RegisteredLoginUI : UIScreen
 
     private void OnRegisterButtonClicked()
     {
+        ClearInputFields();
         uiManager.SwitchToScreen(UIScreenType.Registration);
     }
 
     private void OnForgotPasswordClicked()
     {
+        ClearInputFields();
         uiManager.SwitchToScreen(UIScreenType.PasswordRestoration);
     }
 

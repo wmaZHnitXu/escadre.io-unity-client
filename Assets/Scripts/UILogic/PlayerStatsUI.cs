@@ -36,6 +36,7 @@ public class PlayerStatsUI : UIScreen
         // TODO: uiManager.ShowLoadingIndicator(true);
 
         var (success, stats, errorMessage) = await MasterServerApiService.Instance.GetMyStatsAsync();
+
         Debug.Log($"[PlayerStatsUI.OnShow] GetMyStatsAsync result: success={success}, errorMessage='{errorMessage}'");
         if (stats != null)
         {
@@ -56,9 +57,13 @@ public class PlayerStatsUI : UIScreen
         else
         {
             Debug.LogError($"Failed to load player stats: {errorMessage}");
-            // TODO: Показать ошибку пользователю на экране статистики
-            // Может быть, показать сообщение "Не удалось загрузить статистику"
-            // и оставить кнопку "Назад" активной.
+            
+            UIManager.Instance.ShowErrorScreen(
+            "Ошибка загрузки Статистики", 
+            "Не удалось загрузить статистику. Пожалуйста, попробуйте позже.", 
+            null, // onBackAction (можно оставить null, чтобы UIManager вернул на предыдущий или главный)
+            UIScreenType.UserProfileUI // screenToReturnTo - явно указываем, куда вернуться
+            );
         }
     }
 

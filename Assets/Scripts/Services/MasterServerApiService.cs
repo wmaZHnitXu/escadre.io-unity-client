@@ -106,7 +106,8 @@ public class MasterServerApiService : MonoBehaviour
     private void HandleConnectionError(string errorMessage)
     {
         Debug.LogError($"MasterServerApiService: Connection Error: {errorMessage}");
-        // TODO: Показать пользователю сообщение об ошибке соединения
+
+        UIManager.Instance.ShowErrorScreen("Ошибка Соединения", errorMessage, null, UIScreenType.AnonymousLogin);    
     }
     private void HandleRegistrationSuccess(string serverMessage) // Сервер шлет простое сообщение
     {
@@ -315,7 +316,14 @@ public class MasterServerApiService : MonoBehaviour
     public async Task<(bool success, TokenResponseDto response, string errorMessage)> GetAnonymousTokenAsync(string nickname)
     {
         await EnsureConnectedAsync(); 
-        if (!connection.IsConnected) return (false, null, "Failed to connect to server.");
+        if (!connection.IsConnected)
+        {
+            // Если EnsureConnectedAsync не смог подключиться, он должен был бы вызвать OnConnectionError,
+            // который покажет экран ошибки. Но для надежности можно добавить и здесь.
+            string errorMsg = "Не удалось подключиться к серверу. Проверьте ваше интернет-соединение.";
+            UIManager.Instance.ShowErrorScreen("Ошибка Подключения", errorMsg, null, UIScreenType.AnonymousLogin);
+            return (false, null, errorMsg); // Возвращаем ошибку, чтобы UI не пытался ничего делать дальше
+        }
 
         var requestDto = new AnonymousTokenRequestDto { Nickname = nickname };
         Debug.Log($"[GetAnonymousTokenAsync] Sending Nickname in DTO: '{requestDto.Nickname}'");
@@ -349,6 +357,8 @@ public class MasterServerApiService : MonoBehaviour
         await EnsureConnectedAsync(forceDisconnect: true);
         if (!connection.IsConnected) 
         {
+            string errorMsg = "Не удалось подключиться к серверу. Проверьте ваше интернет-соединение.";
+            UIManager.Instance.ShowErrorScreen("Ошибка Подключения", errorMsg, null, UIScreenType.AnonymousLogin);
             return (false, new RegistrationResultDto { IsSuccess = false, Errors = new[]{"Connection failed."} }, "Failed to connect to server.");
         }
 
@@ -395,6 +405,8 @@ public class MasterServerApiService : MonoBehaviour
         await EnsureConnectedAsync(forceDisconnect: true); // Логин - без предыдущего токена
         if (!connection.IsConnected) 
         {
+            string errorMsg = "Не удалось подключиться к серверу. Проверьте ваше интернет-соединение.";
+            UIManager.Instance.ShowErrorScreen("Ошибка Подключения", errorMsg, null, UIScreenType.AnonymousLogin);
             return (false, null, "Failed to connect to server for login.");
         }
 
@@ -458,6 +470,8 @@ public class MasterServerApiService : MonoBehaviour
         await EnsureConnectedAsync(forceDisconnect: true);
         if (!connection.IsConnected)
         {
+            string errorMsg = "Не удалось подключиться к серверу. Проверьте ваше интернет-соединение.";
+            UIManager.Instance.ShowErrorScreen("Ошибка Подключения", errorMsg, null, UIScreenType.AnonymousLogin);
             return (false, new PasswordResetRequestResultDto { IsSuccess = false, Error = "Connection failed." }, "Failed to connect to server.");
         }
 
@@ -495,6 +509,8 @@ public class MasterServerApiService : MonoBehaviour
         await EnsureConnectedAsync(forceDisconnect: true);
         if (!connection.IsConnected)
         {
+            string errorMsg = "Не удалось подключиться к серверу. Проверьте ваше интернет-соединение.";
+            UIManager.Instance.ShowErrorScreen("Ошибка Подключения", errorMsg, null, UIScreenType.AnonymousLogin);
             return (false, new PasswordResetResultDto { IsSuccess = false, Error = "Connection failed." }, "Failed to connect to server.");
         }
 

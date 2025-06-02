@@ -99,8 +99,9 @@ public class AnonymousLoginUI : UIScreen
         else
         {
             Debug.LogError($"Anonymous login failed: {errorMessage}");
-            // TODO: Показать пользователю errorMessage
-            // errorDisplay.Show($"Ошибка входа: {errorMessage}");
+            // Показываем ошибку пользователю. Кнопка "Назад" вернет на AnonymousLogin.
+            UIManager.Instance.ShowErrorScreen("Ошибка Входа", errorMessage, null, UIScreenType.AnonymousLogin);
+            SetUIInteractable(true); // Разблокируем текущий экран, т.к. остались на нем (пока не нажали "Назад" на ErrorScreen)
         }
 
         SetUIInteractable(true);

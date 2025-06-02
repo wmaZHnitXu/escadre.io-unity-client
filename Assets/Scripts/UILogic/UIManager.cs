@@ -18,6 +18,7 @@ public class UIManager : MonoBehaviour
     [SerializeField] private EnterNewPasswordUI enterNewPasswordScreen;
     [SerializeField] private AccountNotFoundUI accountNotFoundScreen;
     [SerializeField] private PlayerStatsUI playerStatsScreen;
+    [SerializeField] private ErrorScreenUI errorScreen;
 
     private UIScreen currentVisibleScreen; // Используем UIScreen
 
@@ -67,6 +68,7 @@ public class UIManager : MonoBehaviour
         if (enterNewPasswordScreen != null) enterNewPasswordScreen.Hide(true);
         if (accountNotFoundScreen != null) accountNotFoundScreen.Hide(true);
         if (playerStatsScreen != null) playerStatsScreen.Hide(true);
+        if (errorScreen != null) errorScreen.Hide(true);
     }
 
     public void SwitchToScreen(UIScreenType screenType, bool hideInstantly = false, Action onSwitched = null)
@@ -106,6 +108,36 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    public void ShowErrorScreen(string title, string message, Action onBackAction = null, UIScreenType? screenToReturnTo = null)
+    {
+        ErrorScreenUI es = GetScreenByType(UIScreenType.ErrorScreen) as ErrorScreenUI;
+        if (es != null)
+        {
+            Action backAction = onBackAction;
+            if (backAction == null && screenToReturnTo.HasValue)
+            {
+                backAction = () => SwitchToScreen(screenToReturnTo.Value);
+            }
+            else if (backAction == null) // Действие по умолчанию, если ничего не указано
+            {
+                backAction = () => {
+                    // Попытаться вернуться на предыдущий экран, если есть такая логика,
+                    // или на главный экран по умолчанию.
+                    // Для простоты пока на AnonymousLogin.
+                    SwitchToScreen(UIScreenType.AnonymousLogin);
+                };
+            }
+            es.SetupError(title, message, backAction);
+            SwitchToScreen(UIScreenType.ErrorScreen);
+        }
+        else
+        {
+            Debug.LogError("ErrorScreen is not assigned or found in UIManager. Cannot display error.");
+            // Как запасной вариант, можно просто залогировать ошибку, если UI для ошибки не работает
+            Debug.LogError($"FALLBACK ERROR DISPLAY: Title: {title}, Message: {message}");
+        }
+    }
+
     public UIScreen GetScreenByType(UIScreenType screenType)
     {
         switch (screenType)
@@ -121,6 +153,7 @@ public class UIManager : MonoBehaviour
             case UIScreenType.EnterNewPassword: return enterNewPasswordScreen;
             case UIScreenType.AccountNotFound: return accountNotFoundScreen;
             case UIScreenType.PlayerStats: return playerStatsScreen;
+            case UIScreenType.ErrorScreen: return errorScreen;
             
             default:
                 Debug.LogError($"No screen configured for UIScreenType: {screenType}");

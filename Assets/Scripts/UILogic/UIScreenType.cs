@@ -1,6 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
 
 namespace Assets.Scripts.UILogic
 {
@@ -17,7 +14,8 @@ namespace Assets.Scripts.UILogic
         PasswordResetEmailSent,   // Скриншот 2: Письмо для сброса пароля отправлено (с таймером)
         EnterNewPassword,         // Скриншот 3: Ввод нового пароля после подтверждения сброса
         AccountNotFound, 
-        PlayerStats 
+        PlayerStats, 
+        ErrorScreen 
     }
 }
 
