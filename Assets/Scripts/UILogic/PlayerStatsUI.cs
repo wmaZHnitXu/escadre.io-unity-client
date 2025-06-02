@@ -65,19 +65,19 @@ public class PlayerStatsUI : UIScreen
     private void ClearStats()
     {
         nicknameText.text = "Загрузка...";
-        killsText.text = "Убийства: -";
-        deathsText.text = "Смерти: -";
-        playTimeText.text = "Время в игре: -";
-        kdRatioText.text = "K/D: -";
+        killsText.text = "-";
+        deathsText.text = "-";
+        playTimeText.text = "-";
+        kdRatioText.text = "-";
     }
 
     private void DisplayStats(PlayerStatsDto stats)
     {
         nicknameText.text = $"{stats.Nickname}";
-        killsText.text = $"Убийства: {stats.Kills}";
-        deathsText.text = $"Смерти: {stats.Deaths}";
-        playTimeText.text = $"Время в игре: {stats.PlayTime}";
-        kdRatioText.text = $"K/D: {stats.KDRatio:F2}"; // F2 для форматирования float с 2 знаками после запятой
+        killsText.text = $"{stats.Kills}";
+        deathsText.text = $"{stats.Deaths}";
+        playTimeText.text = $"{stats.PlayTime}";
+        kdRatioText.text = $"{stats.KDRatio:F2}"; // F2 для форматирования float с 2 знаками после запятой
     }
 
     private void OnBackButtonClicked()

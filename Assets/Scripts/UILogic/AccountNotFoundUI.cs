@@ -6,7 +6,6 @@ using Assets.Scripts.UILogic;
 
 public class AccountNotFoundUI : UIScreen
 {
-    [SerializeField] private TMP_Text messageText; // Для "Аккаунта с почтой ... не существует"
     [SerializeField] private Button backButton;
 
     private UIManager uiManager;
@@ -20,15 +19,6 @@ public class AccountNotFoundUI : UIScreen
     private void Start()
     {
         backButton?.onClick.AddListener(OnBackButtonClicked);
-    }
-
-    // Метод для установки email, который не был найден
-    public void SetMissingEmail(string email)
-    {
-        if (messageText != null)
-        {
-            messageText.text = $"Аккаунта с почтой <color=yellow>{email}</color> не существует.\nПроверьте корректность введённого адреса.";
-        }
     }
 
     protected override void OnShow()

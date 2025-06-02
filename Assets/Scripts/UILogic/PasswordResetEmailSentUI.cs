@@ -7,7 +7,6 @@ using Assets.Scripts.UILogic;
 
 public class PasswordResetEmailSentUI : UIScreen
 {
-    [SerializeField] private TMP_Text emailSentToText; // Текст "Мы отправили на почту yournamespecialsvo@proton.mail..."
     [SerializeField] private Button cancelButton;
     [SerializeField] private Button resendButton;
     [SerializeField] private TMP_Text resendButtonText; // Текст на кнопке "Отправить ещё раз (1:05)"
@@ -42,13 +41,6 @@ public class PasswordResetEmailSentUI : UIScreen
     public void SetUserEmail(string email)
     {
         userEmailForResend = email;
-        if (emailSentToText != null)
-        {
-            // Форматируем текст как на скриншоте
-            emailSentToText.text = $"Мы отправили на почту <color=#YOUR_HIGHLIGHT_COLOR>{email}</color> письмо со ссылкой, после перехода по которой пароль будет сброшен.";
-            // Замените #YOUR_HIGHLIGHT_COLOR на нужный вам цвет, например, <color=yellow> или <color=#FFFF00>
-            // Если цвет не нужен, просто: $"Мы отправили на почту {email} письмо..."
-        }
     }
 
     protected override void OnShow()
