@@ -66,14 +66,14 @@ public class AnonymousLoginUI : UIScreen
 
     private void ValidateNickname(string nickname)
     {
-        bool isValid = !string.IsNullOrWhiteSpace(nickname) && nickname.Length >= 3;
+        bool isValid = !string.IsNullOrWhiteSpace(nickname) && nickname.Length >= 1;
         if (playButton != null) playButton.interactable = isValid;
     }
 
     private async void OnPlayButtonClicked()
     {
         string nickname = nicknameInputField.text;
-        if (string.IsNullOrWhiteSpace(nickname) || nickname.Length < 3)
+        if (string.IsNullOrWhiteSpace(nickname) || nickname.Length < 1)
         {
             Debug.LogError("Nickname is too short or empty!");
             // TODO: Показать ошибку пользователю (например, всплывающее сообщение или подсветка поля)
