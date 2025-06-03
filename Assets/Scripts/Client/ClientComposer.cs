@@ -50,12 +50,14 @@ public class ClientComposer : MonoBehaviour
     [Header("Presentation Managers & Visualizers")]
     [SerializeField]
     private ClientPresentationManager clientPresentationManager;
+    // Changed: Now a scene reference
     [SerializeField]
-    private CommandVisualizer commandVisualizerPrefab; // Changed: Now a prefab
+    private CommandVisualizer commandVisualizer; 
 
     [Header("Input")]
+    // Changed: Now a scene reference
     [SerializeField]
-    private PlayerInputController playerInputControllerPrefab; // Changed: Now a prefab
+    private PlayerInputController playerInputController; 
 
     [Header("Camera Control")]
     [SerializeField]
@@ -76,9 +78,9 @@ public class ClientComposer : MonoBehaviour
     [SerializeField, ReadOnly]
     private bool isOceanReady_Display = false;
 
-    // Instantiated components
-    private CommandVisualizer _commandVisualizerInstance;
-    private PlayerInputController _playerInputControllerInstance;
+    // Removed: Instantiated component fields are no longer needed as we use direct references
+    // private CommandVisualizer _commandVisualizerInstance;
+    // private PlayerInputController _playerInputControllerInstance;
 
 
     private ClientLevel _clientLevel;
@@ -151,28 +153,26 @@ public class ClientComposer : MonoBehaviour
 
     private void SetupPlayerInputController()
     {
-        if (playerInputControllerPrefab != null)
+        // Changed: Use direct reference, no instantiation
+        if (playerInputController != null)
         {
-            _playerInputControllerInstance = Instantiate(playerInputControllerPrefab, transform); // Instantiate as child
-            _playerInputControllerInstance.name = $"PlayerInputController_Client{thisClientInstanceId}";
             if (mainGameCamera != null)
             {
-                _playerInputControllerInstance.Initialize(this, mainGameCamera);
+                playerInputController.Initialize(this, mainGameCamera);
             }
             else Logger.LogError($"[ClientComposer {thisClientInstanceId}] MainGameCamera for PlayerInputController not assigned!");
         }
-        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] PlayerInputController PREFAB not assigned.");
+        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] PlayerInputController (scene reference) not assigned in Inspector.");
     }
 
     private void SetupCommandVisualizer()
     {
-        if (commandVisualizerPrefab != null)
+        // Changed: Use direct reference, no instantiation
+        if (commandVisualizer != null)
         {
-            _commandVisualizerInstance = Instantiate(commandVisualizerPrefab, transform); // Instantiate as child
-            _commandVisualizerInstance.name = $"CommandVisualizer_Client{thisClientInstanceId}";
-            _commandVisualizerInstance.Initialize(this);
+            commandVisualizer.Initialize(this);
         }
-        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] CommandVisualizer PREFAB not assigned.");
+        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] CommandVisualizer (scene reference) not assigned in Inspector.");
     }
 
 
@@ -681,14 +681,14 @@ public class ClientComposer : MonoBehaviour
 
     public void UICancelAllAttacks()
     {
-        // _playerInputControllerInstance handles the null check for _gameActions
-        if (_playerInputControllerInstance != null)
+        // Changed: Use direct reference
+        if (playerInputController != null)
         {
-            _playerInputControllerInstance.RequestCancelAllAttacks();
+            playerInputController.RequestCancelAllAttacks();
         }
         else
         {
-            Logger.LogWarning($"[ClientComposer] UICancelAllAttacks called, but PlayerInputController instance is not available.");
+            Logger.LogWarning($"[ClientComposer] UICancelAllAttacks called, but PlayerInputController (scene reference) is not available.");
             // Fallback if PlayerInputController wasn't instantiated but GameActions is
             if (GameActions != null && LocalEscadreProxy != null && !LocalEscadreProxy.IsDestroyed) {
                 GameActions.SendCancelAttack();
@@ -716,8 +716,9 @@ public class ClientComposer : MonoBehaviour
         _gameActions = null; // It's just a reference, not IDisposable
         _clientClock = null; // Not IDisposable
 
-        if (_commandVisualizerInstance != null) Destroy(_commandVisualizerInstance.gameObject);
-        if (_playerInputControllerInstance != null) Destroy(_playerInputControllerInstance.gameObject);
+        // Changed: ClientComposer no longer owns these GameObjects if they are scene references.
+        // if (_commandVisualizerInstance != null) Destroy(_commandVisualizerInstance.gameObject);
+        // if (_playerInputControllerInstance != null) Destroy(_playerInputControllerInstance.gameObject);
 
 
         if (clientOceanVisualizer != null && clientOceanVisualizer.gameObject.scene.name != null && clientOceanVisualizer.name.EndsWith("_Instance"))
