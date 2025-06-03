@@ -1,20 +1,23 @@
 // File: Scripts/Client/ClientComposer.cs
-using UnityEngine;
+using UnityEngine; // Fully qualify: UnityEngine.Vector3, Quaternion, Camera, Color etc.
 using Core.Network;
 using Core.Client;
 using Core.Logging;
 using Core.Time;
-using Logger = Core.Logging.Logger;
+using Logger = Core.Logging.Logger; // Alias
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
-using Core.Primitives;
+using Core.Primitives; // For Core.Primitives.Vector2
 using System;
-using Vector2 = Core.Primitives.Vector2;
-using Core.Model;
-using Core.Network.Proxies;
+// Using Core.Primitives.Vector2 directly, no need for `using Vector2 = Core.Primitives.Vector2;`
+
+using Core.Model; // For Entity.EntityTypeEnum
+using Core.Network.Proxies; // For EscadreProxy
 using Core.Ocean;
-using Client.Camera; 
+using Client.Camera; // For TopDownCameraController
+using Client.InputServices; // For PlayerInputController
+using Client.Presentation;  // For CommandVisualizer
 
 public class ClientComposer : MonoBehaviour
 {
@@ -32,30 +35,33 @@ public class ClientComposer : MonoBehaviour
 
     [Header("Ocean Settings Provider")]
     [SerializeField]
-    [Tooltip("Assign the OceanSettingsProvider component that configures client-side ocean parameters and texture data.")]
     private OceanSettingsProvider oceanSettingsProvider;
 
     [Header("Ocean Debug Visualizer (Client)")]
     [SerializeField]
-    [Tooltip("Optional: Assign an OceanDebugVisualizer instance for client-side visualization. If not assigned, it will try to find one on this GameObject or its children, or on the OceanSettingsProvider's GameObject or its children.")]
     private OceanDebugVisualizer clientOceanVisualizer;
 
     [Header("Ocean Presentation (Client)")]
     [SerializeField]
-    [Tooltip("Assign an OceanPresentation instance from the scene or a prefab to be instantiated. If prefab, ensure it's configured correctly.")]
     private OceanPresentation oceanPresentation;
     [SerializeField]
-    [Tooltip("The material to be used by the OceanPresentation. Should use the LowPolyOceanWater shader.")]
     private Material oceanMaterial;
 
-    [Header("Presentation")]
+    [Header("Presentation Managers & Visualizers")]
     [SerializeField]
     private ClientPresentationManager clientPresentationManager;
-
-    [Header("Camera Control")] 
     [SerializeField]
-    [Tooltip("Assign the TopDownCameraController (on the CameraRig object) from the scene.")]
+    private CommandVisualizer commandVisualizerPrefab; // Changed: Now a prefab
+
+    [Header("Input")]
+    [SerializeField]
+    private PlayerInputController playerInputControllerPrefab; // Changed: Now a prefab
+
+    [Header("Camera Control")]
+    [SerializeField]
     private TopDownCameraController topDownCameraController;
+    [SerializeField]
+    private UnityEngine.Camera mainGameCamera;
 
 
     [Header("Debug Info")]
@@ -70,14 +76,25 @@ public class ClientComposer : MonoBehaviour
     [SerializeField, ReadOnly]
     private bool isOceanReady_Display = false;
 
+    // Instantiated components
+    private CommandVisualizer _commandVisualizerInstance;
+    private PlayerInputController _playerInputControllerInstance;
+
 
     private ClientLevel _clientLevel;
+    public ClientLevel ClientLevel => _clientLevel;
+
     private ClientEntityManager _entityManager;
     private IClientNetworkLayer _clientNetworkAccess;
     private IClock _clientClock;
-    private ClientGameActions _gameActions;
 
-    public EscadreProxy.ClientProxy LocalEscadreProxy { get; private set; }
+    private ClientGameActions _gameActions;
+    public ClientGameActions GameActions => _gameActions;
+
+    private EscadreProxy.ClientProxy _localEscadreProxy;
+    public EscadreProxy.ClientProxy LocalEscadreProxy => _localEscadreProxy;
+    public event Action<EscadreProxy.ClientProxy> OnLocalEscadreProxyChanged;
+
 
     void Awake()
     {
@@ -87,29 +104,22 @@ public class ClientComposer : MonoBehaviour
 
         _clientClock = new UnityClock();
 
+        // --- Dependency Checks ---
         if (oceanSettingsProvider == null)
         {
-            Logger.LogError($"[ClientComposer {thisClientInstanceId}] OceanSettingsProvider not assigned! Ocean data will not be available for client. Attempting to find in scene.");
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] OceanSettingsProvider not assigned. Attempting to find.");
             oceanSettingsProvider = FindObjectOfType<OceanSettingsProvider>();
-            if (oceanSettingsProvider == null)
-            {
-                Logger.LogError($"[ClientComposer {thisClientInstanceId}] OceanSettingsProvider not found in scene. Client-side ocean will be disabled until server sends settings.");
-            }
+            if (oceanSettingsProvider == null) Logger.LogError($"[ClientComposer {thisClientInstanceId}] OceanSettingsProvider not found.");
         }
-
-        if (oceanMaterial == null)
-        {
-            Logger.LogError($"[ClientComposer {thisClientInstanceId}] Ocean material not assigned! Please assign a material that uses the 'Custom/LowPolyOceanWater' shader in the inspector.");
-        }
-
-
+        if (oceanMaterial == null) Logger.LogError($"[ClientComposer {thisClientInstanceId}] Ocean material not assigned!");
         if (mockNetworkLayer == null)
         {
-            Logger.LogError($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer not assigned! Attempting to find.");
+            Logger.LogError($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer not assigned. Attempting to find.");
             mockNetworkLayer = FindObjectOfType<MockNetworkLayer>();
             if (mockNetworkLayer == null) { Logger.LogError($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer not found. Client cannot function."); enabled = false; return; }
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] MockNetworkLayer found in scene. Assign in Inspector for robustness.");
         }
+        // --- End Dependency Checks ---
+
         _clientNetworkAccess = mockNetworkLayer;
         mockNetworkLayer.defaultSendingClientId = thisClientInstanceId;
 
@@ -122,36 +132,103 @@ public class ClientComposer : MonoBehaviour
         _clientLevel.OnProxyAdded += TryFindAndAssignLocalEscadreProxy;
         _clientLevel.OnProxyRemoved += HandleLocalEscadreProxyRemoval;
 
+        // --- Systems Initialization ---
+        SetupMainCamera();
         SetupOceanDebugVisualizer();
         SetupOceanPresentation();
-        SetupCameraInputStrategy(); 
+        SetupCameraInputStrategy();
 
         if (clientPresentationManager == null) clientPresentationManager = GetComponent<ClientPresentationManager>();
         if (clientPresentationManager != null) clientPresentationManager.Initialize(_clientLevel);
+        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] ClientPresentationManager not assigned or found.");
+
+        SetupPlayerInputController();
+        SetupCommandVisualizer();
+        // --- End Systems Initialization ---
 
         Logger.Log($"[ClientComposer {thisClientInstanceId}] Client Core Initialization complete. Will attempt connection in OnEnable.");
     }
+
+    private void SetupPlayerInputController()
+    {
+        if (playerInputControllerPrefab != null)
+        {
+            _playerInputControllerInstance = Instantiate(playerInputControllerPrefab, transform); // Instantiate as child
+            _playerInputControllerInstance.name = $"PlayerInputController_Client{thisClientInstanceId}";
+            if (mainGameCamera != null)
+            {
+                _playerInputControllerInstance.Initialize(this, mainGameCamera);
+            }
+            else Logger.LogError($"[ClientComposer {thisClientInstanceId}] MainGameCamera for PlayerInputController not assigned!");
+        }
+        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] PlayerInputController PREFAB not assigned.");
+    }
+
+    private void SetupCommandVisualizer()
+    {
+        if (commandVisualizerPrefab != null)
+        {
+            _commandVisualizerInstance = Instantiate(commandVisualizerPrefab, transform); // Instantiate as child
+            _commandVisualizerInstance.name = $"CommandVisualizer_Client{thisClientInstanceId}";
+            _commandVisualizerInstance.Initialize(this);
+        }
+        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] CommandVisualizer PREFAB not assigned.");
+    }
+
+
+    private void SetupMainCamera()
+    {
+        if (mainGameCamera == null)
+        {
+            if (topDownCameraController != null && topDownCameraController.mainCamera != null)
+            {
+                mainGameCamera = topDownCameraController.mainCamera;
+                Logger.Log($"[ClientComposer {thisClientInstanceId}] MainGameCamera assigned from TopDownCameraController.");
+            }
+            else
+            {
+                mainGameCamera = UnityEngine.Camera.main;
+                if (mainGameCamera != null)
+                {
+                    Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] MainGameCamera not assigned, falling back to UnityEngine.Camera.main.");
+                }
+                else
+                {
+                    Logger.LogError($"[ClientComposer {thisClientInstanceId}] MainGameCamera not assigned and UnityEngine.Camera.main is null! Critical for input and camera systems.");
+                    // Consider disabling further setup if camera is crucial and missing
+                    // enabled = false; 
+                    return;
+                }
+            }
+        }
+        if (topDownCameraController != null && topDownCameraController.mainCamera == null && mainGameCamera != null)
+        {
+            topDownCameraController.mainCamera = mainGameCamera;
+        }
+    }
+
 
     private void SetupCameraInputStrategy()
     {
         if (topDownCameraController != null)
         {
-            if (topDownCameraController.mainCamera == null)
+            if (mainGameCamera == null)
             {
-                Logger.LogError($"[ClientComposer {thisClientInstanceId}] TopDownCameraController's 'mainCamera' field is not assigned. Cannot set input strategy.");
+                Logger.LogError($"[ClientComposer {thisClientInstanceId}] MainGameCamera is not assigned. Cannot set camera input strategy.");
                 return;
             }
+            if (topDownCameraController.mainCamera == null) topDownCameraController.mainCamera = mainGameCamera;
+
 
             #if UNITY_STANDALONE || UNITY_EDITOR
-            topDownCameraController.SetInputStrategy(new DesktopCameraInput(topDownCameraController.mainCamera));
+            topDownCameraController.SetInputStrategy(new DesktopCameraInput(mainGameCamera));
             #elif UNITY_ANDROID || UNITY_IOS
-            topDownCameraController.SetInputStrategy(new MobileCameraInput(topDownCameraController.mainCamera));
+            topDownCameraController.SetInputStrategy(new MobileCameraInput(mainGameCamera));
             #else
             Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Unknown platform for camera input. Defaulting to DesktopCameraInput.");
-            topDownCameraController.SetInputStrategy(new DesktopCameraInput(topDownCameraController.mainCamera));
+            topDownCameraController.SetInputStrategy(new DesktopCameraInput(mainGameCamera));
             #endif
-            
-            // Pass ocean boundary to camera controller if oceanPresentation is ready or will be ready
+
             if (oceanPresentation != null)
             {
                 topDownCameraController.SetOceanBoundary(oceanPresentation);
@@ -166,24 +243,28 @@ public class ClientComposer : MonoBehaviour
 
     private void SetupOceanDebugVisualizer()
     {
-        if (clientOceanVisualizer == null)
+        if (clientOceanVisualizer == null) // If not assigned via inspector
         {
-            clientOceanVisualizer = GetComponentInChildren<OceanDebugVisualizer>();
-            if (clientOceanVisualizer == null && oceanSettingsProvider != null)
-            {
+            // Try to find an existing one, e.g. if OceanSettingsProvider has one as a child
+            if (oceanSettingsProvider != null)
                 clientOceanVisualizer = oceanSettingsProvider.GetComponentInChildren<OceanDebugVisualizer>();
-            }
+            if(clientOceanVisualizer == null) // Still not found, try self
+                clientOceanVisualizer = GetComponentInChildren<OceanDebugVisualizer>();
         }
+
 
         if (clientOceanVisualizer != null)
         {
+            // If it's a prefab reference (gameObject.scene.name is null), then instantiate it.
+            // Otherwise, assume it's an instance in the scene.
             if (clientOceanVisualizer.gameObject.scene.name == null)
             {
                 Transform parentTransform = (oceanSettingsProvider != null) ? oceanSettingsProvider.transform : transform;
                 clientOceanVisualizer = Instantiate(clientOceanVisualizer, parentTransform.position, UnityEngine.Quaternion.identity, parentTransform);
                 clientOceanVisualizer.name = "ClientOceanDebugVisualizer_Instance";
             }
-            Logger.Log($"[ClientComposer {thisClientInstanceId}] ClientOceanVisualizer is set up, waiting for ocean data to fully initialize.");
+            // Initialization will happen after ocean data is received.
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] ClientOceanVisualizer is set up, waiting for ocean data.");
         }
         else
         {
@@ -193,18 +274,19 @@ public class ClientComposer : MonoBehaviour
 
     private void SetupOceanPresentation()
     {
-        if (oceanPresentation == null) 
+        if (oceanPresentation == null) // If not assigned as a prefab in inspector
         {
-            oceanPresentation = FindObjectOfType<OceanPresentation>();
+            oceanPresentation = FindObjectOfType<OceanPresentation>(); // Check if one exists in the scene
             if (oceanPresentation == null)
             {
-                Logger.Log($"[ClientComposer {thisClientInstanceId}] OceanPresentation not found in scene. Attempting to create from default settings.");
-                GameObject opGO = new GameObject("OceanPresentation_Instance");
-                opGO.transform.SetParent((oceanSettingsProvider != null) ? oceanSettingsProvider.transform : transform, false);
-                oceanPresentation = opGO.AddComponent<OceanPresentation>();
+                Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] OceanPresentation not found in scene nor assigned as prefab. Ocean rendering might be missing.");
+                // Optionally, you could instantiate a default OceanPresentation prefab here if you have one.
+                // For now, it will only work if one is in the scene or assigned as prefab.
+                return;
             }
         }
-        else if (oceanPresentation.gameObject.scene.name == null) 
+        // If oceanPresentation was assigned as a prefab in inspector, it needs instantiation
+        else if (oceanPresentation.gameObject.scene.name == null)
         {
             Transform parentTransform = (oceanSettingsProvider != null) ? oceanSettingsProvider.transform : this.transform;
             oceanPresentation = Instantiate(oceanPresentation, parentTransform.position, UnityEngine.Quaternion.identity, parentTransform);
@@ -212,10 +294,10 @@ public class ClientComposer : MonoBehaviour
             Logger.Log($"[ClientComposer {thisClientInstanceId}] Instantiated OceanPresentation from prefab.");
         }
 
+
         if (oceanPresentation != null)
         {
             Logger.Log($"[ClientComposer {thisClientInstanceId}] OceanPresentation is set up, waiting for ocean data to fully initialize.");
-            // If camera controller is already set up, ensure it knows about the ocean presentation
             if (topDownCameraController != null)
             {
                 topDownCameraController.SetOceanBoundary(oceanPresentation);
@@ -271,8 +353,8 @@ public class ClientComposer : MonoBehaviour
             if (oceanPresentation == null) reason += "OceanPresentation component missing. ";
             if (_clientLevel.OceanDataProvider == null) reason += "OceanDataProvider not ready. ";
             if (oceanMaterial == null) reason += "OceanMaterial missing. ";
-            if (textureBytesToUse == null) reason += "TextureBytes missing. ";
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] OceanPresentation could NOT be initialized. Reason(s): {reason}");
+            if (textureBytesToUse == null) reason += "TextureBytes missing for OceanPresentation. ";
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] OceanPresentation could NOT be fully initialized. Reason(s): {reason}");
         }
 
         CheckSessionActivation();
@@ -284,29 +366,26 @@ public class ClientComposer : MonoBehaviour
         {
             if (escadreProxy.OwnerClientId == thisClientInstanceId)
             {
-                if (LocalEscadreProxy != null && LocalEscadreProxy.EntityId != escadreProxy.EntityId)
+                bool changed = (_localEscadreProxy == null) || (_localEscadreProxy.EntityId != escadreProxy.EntityId);
+                if (_localEscadreProxy != null && changed)
                 {
-                    Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] New local EscadreProxy (ID: {escadreProxy.EntityId}) assigned, replacing old one (ID: {LocalEscadreProxy.EntityId}).");
-                    UnsubscribeFromLocalEscadreEvents();
-                    if (topDownCameraController != null && topDownCameraController.GetTargetToFollow() != null && topDownCameraController.GetTargetToFollow().name.StartsWith(LocalEscadreProxy.EntityType + "_" + LocalEscadreProxy.EntityId))
-                    {
-                        topDownCameraController.SetTarget(null); 
-                    }
+                     Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] New local EscadreProxy (ID: {escadreProxy.EntityId}) assigned, replacing old one (ID: {_localEscadreProxy.EntityId}).");
+                     UnsubscribeFromLocalEscadreEvents();
+                     if (topDownCameraController != null && topDownCameraController.GetTargetToFollow() != null) {
+                        var targetCPP = topDownCameraController.GetTargetToFollow().GetComponent<ClientProxyPresentation>();
+                        if(targetCPP != null && targetCPP.TargetProxy != null && targetCPP.TargetProxy.EntityId == _localEscadreProxy.EntityId) {
+                            topDownCameraController.SetTarget(null);
+                        }
+                     }
                 }
-                else if (LocalEscadreProxy != null && LocalEscadreProxy.EntityId == escadreProxy.EntityId)
-                {
-                    if (topDownCameraController != null && topDownCameraController.GetTargetToFollow() == null)
-                    {
-                        TrySetCameraTargetToLocalEscadre();
-                    }
-                    return;
-                }
+                _localEscadreProxy = escadreProxy;
+                OnLocalEscadreProxyChanged?.Invoke(_localEscadreProxy);
 
-                LocalEscadreProxy = escadreProxy;
-                localEscadreEntityId_Display = LocalEscadreProxy.EntityId;
-                Logger.Log($"[ClientComposer {thisClientInstanceId}] Local EscadreProxy found and assigned! Entity ID: {LocalEscadreProxy.EntityId}, Owner: {LocalEscadreProxy.OwnerClientId}");
+                localEscadreEntityId_Display = _localEscadreProxy.EntityId;
+                if(changed) Logger.Log($"[ClientComposer {thisClientInstanceId}] Local EscadreProxy ASSIGNED! Entity ID: {_localEscadreProxy.EntityId}, Owner: {_localEscadreProxy.OwnerClientId}");
+
                 SubscribeToLocalEscadreEvents();
-                TrySetCameraTargetToLocalEscadre(); 
+                TrySetCameraTargetToLocalEscadre();
                 CheckSessionActivation();
             }
         }
@@ -319,7 +398,7 @@ public class ClientComposer : MonoBehaviour
             GameObject presentationGO = FindPresentationForProxy(LocalEscadreProxy.EntityId);
             if (presentationGO != null)
             {
-                topDownCameraController.SetTarget(presentationGO.transform, true); 
+                topDownCameraController.SetTarget(presentationGO.transform, true);
                 Logger.Log($"[ClientComposer {thisClientInstanceId}] Camera target set to local escadre: {presentationGO.name}");
             }
             else
@@ -328,22 +407,20 @@ public class ClientComposer : MonoBehaviour
             }
         }
     }
-    
+
     private GameObject FindPresentationForProxy(int proxyId)
     {
         if (clientPresentationManager == null) return null;
-       
-        // Find the ClientProxyPresentation associated with the proxyId
-        // This assumes ClientPresentationManager holds references to active presentations
-        // or can query them.
-        // A more direct way is if ClientProxyPresentation instances are children of some known parent.
-        foreach (var presentationObject in FindObjectsOfType<ClientProxyPresentation>())
+        // This is a simplified placeholder. ClientPresentationManager should ideally provide a method.
+        ClientProxyPresentation[] allPresentations = FindObjectsOfType<ClientProxyPresentation>(true); // Include inactive
+        foreach (var presentation in allPresentations)
         {
-            if (presentationObject.TargetProxy != null && presentationObject.TargetProxy.EntityId == proxyId)
+            if (presentation.TargetProxy != null && presentation.TargetProxy.EntityId == proxyId)
             {
-                return presentationObject.gameObject;
+                return presentation.gameObject;
             }
         }
+        Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] FindPresentationForProxy could not find GO for proxy ID {proxyId}.");
         return null;
     }
 
@@ -363,12 +440,13 @@ public class ClientComposer : MonoBehaviour
                     var cpp = currentTarget.GetComponent<ClientProxyPresentation>();
                     if (cpp != null && cpp.TargetProxy != null && cpp.TargetProxy.EntityId == LocalEscadreProxy.EntityId)
                     {
-                        topDownCameraController.SetTarget(null); 
+                        topDownCameraController.SetTarget(null);
                         Logger.Log($"[ClientComposer {thisClientInstanceId}] Camera target cleared as local escadre was removed.");
                     }
                 }
             }
-            LocalEscadreProxy = null;
+            _localEscadreProxy = null;
+            OnLocalEscadreProxyChanged?.Invoke(null);
             localEscadreEntityId_Display = -1;
             isSessionFullyActive = false;
         }
@@ -377,6 +455,8 @@ public class ClientComposer : MonoBehaviour
     private void SubscribeToLocalEscadreEvents()
     {
         if (LocalEscadreProxy == null) return;
+        UnsubscribeFromLocalEscadreEvents(); // Prevent double subscription
+
         LocalEscadreProxy.OnShopDesignsChanged += HandleShopDesignsChanged_Debug;
         LocalEscadreProxy.OnFormationChanged += HandleFormationChanged_Debug;
         LocalEscadreProxy.OnResourcesChanged += HandleResourcesChanged_Debug;
@@ -417,13 +497,13 @@ public class ClientComposer : MonoBehaviour
     {
         if (isSessionFullyActive) return;
 
-        bool escadreProxyExists = LocalEscadreProxy != null;
+        bool escadreProxyExists = LocalEscadreProxy != null && !LocalEscadreProxy.IsDestroyed;
         bool shopInfoExists = escadreProxyExists && LocalEscadreProxy.AvailableShopDesigns.Any();
 
         if (escadreProxyExists && shopInfoExists && _clientLevel.IsOceanInitialized)
         {
             isSessionFullyActive = true;
-            Logger.Log($"[ClientComposer {thisClientInstanceId}] Game session is now FULLY active (local EscadreProxy initialized with shop designs and ocean data received).");
+            Logger.Log($"[ClientComposer {thisClientInstanceId}] Game session is now FULLY active.");
             if (topDownCameraController != null && topDownCameraController.GetTargetToFollow() == null)
             {
                 TrySetCameraTargetToLocalEscadre();
@@ -436,14 +516,14 @@ public class ClientComposer : MonoBehaviour
         if (_clientClock != null) currentTime_Display = _clientClock.CurrentTime;
         if (_clientLevel != null) isOceanReady_Display = _clientLevel.IsOceanInitialized;
 
-        if (LocalEscadreProxy != null && oceanPresentation != null)
+        if (LocalEscadreProxy != null && oceanPresentation != null && LocalEscadreProxy.Position != null)
         {
             oceanPresentation.FollowTarget(LocalEscadreProxy.Position.ToUnityVector());
         }
 
         if (!isSessionFullyActive && isConnectionAttempted && LocalEscadreProxy == null)
         {
-            if (Time.frameCount % 60 == 0)
+            if (Time.frameCount % 60 == 0 && _clientLevel != null)
             {
                 var foundProxy = _clientLevel.ActiveProxies.Values
                     .OfType<EscadreProxy.ClientProxy>()
@@ -458,17 +538,13 @@ public class ClientComposer : MonoBehaviour
         if (!isSessionFullyActive && isConnectionAttempted)
         {
             CheckSessionActivation();
-
             if (!isSessionFullyActive && Time.frameCount > 60 && Time.frameCount % 120 == 0)
             {
                 string reasons = "";
                 if (LocalEscadreProxy == null) reasons += "Waiting for local Escadre proxy. ";
-                else
-                {
-                    if (!LocalEscadreProxy.AvailableShopDesigns.Any()) reasons += "Waiting for shop designs info on Escadre proxy. ";
-                }
-                if (!_clientLevel.IsOceanInitialized) reasons += "Waiting for ocean initialization data. ";
-                Logger.Log($"[ClientComposer {thisClientInstanceId}] Session not fully active yet. Reason(s): {reasons}");
+                else if (!LocalEscadreProxy.AvailableShopDesigns.Any()) reasons += "Waiting for shop designs. ";
+                if (!_clientLevel.IsOceanInitialized) reasons += "Waiting for ocean init. ";
+                if(!string.IsNullOrEmpty(reasons)) Logger.Log($"[ClientComposer {thisClientInstanceId}] Session not fully active. Reasons: {reasons}");
             }
         }
 
@@ -482,7 +558,7 @@ public class ClientComposer : MonoBehaviour
 
     private void CycleCameraTarget()
     {
-        if (topDownCameraController == null || clientPresentationManager == null || !_clientLevel.ActiveProxies.Any())
+        if (topDownCameraController == null || clientPresentationManager == null || _clientLevel == null || !_clientLevel.ActiveProxies.Any())
         {
             return;
         }
@@ -512,7 +588,7 @@ public class ClientComposer : MonoBehaviour
         GameObject presentationGO = FindPresentationForProxy(nextTargetProxy.EntityId);
         if (presentationGO != null)
         {
-            topDownCameraController.SetTarget(presentationGO.transform, false); 
+            topDownCameraController.SetTarget(presentationGO.transform, false);
             Logger.Log($"[ClientComposer {thisClientInstanceId}] Cycled camera target to Escadre ID: {nextTargetProxy.EntityId}");
         }
         else
@@ -542,25 +618,22 @@ public class ClientComposer : MonoBehaviour
         var design = LocalEscadreProxy.AvailableShopDesigns.FirstOrDefault(d => d.ShipEntityType == Entity.EntityTypeEnum.DefaultShip);
         if (design == null)
         {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] DefaultShip design not found in shop info. Available: {string.Join(", ", LocalEscadreProxy.AvailableShopDesigns.Select(x => x.Name))}");
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] DefaultShip design not found in shop info.");
             return;
         }
-
-        float newX = 0;
-        float newY = LocalEscadreProxy.FormationSlots.Count * 2.5f;
-        _gameActions.RequestBuyShip(design.DesignId, new Vector2(newX, newY));
+        _gameActions.RequestBuyShip(design.DesignId, new Core.Primitives.Vector2(0, LocalEscadreProxy.FormationSlots.Count * 2.5f));
     }
 
     [ContextMenu("Shop: Upgrade First Ship")]
     public void MockUpgradeFirstShip()
     {
-        if (!isSessionFullyActive || LocalEscadreProxy == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not active or LocalEscadreProxy missing. Cannot upgrade ship."); return; }
+        if (!isSessionFullyActive || LocalEscadreProxy == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not active or LocalEscadreProxy missing."); return; }
         if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
 
         var firstShipSlot = LocalEscadreProxy.FormationSlots.FirstOrDefault(s => s.ShipEntityId.HasValue);
         if (firstShipSlot == null || !firstShipSlot.ShipEntityId.HasValue)
         {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ship with an ID found in the current formation slots to upgrade.");
+            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ship in formation to upgrade.");
             return;
         }
         _gameActions.RequestUpgradeShip(firstShipSlot.ShipEntityId.Value);
@@ -569,25 +642,23 @@ public class ClientComposer : MonoBehaviour
     [ContextMenu("Formation: Set Random Valid Formation")]
     public void MockSetRandomFormation()
     {
-        if (!isSessionFullyActive || LocalEscadreProxy == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not active or LocalEscadreProxy missing. Cannot set formation."); return; }
+        if (!isSessionFullyActive || LocalEscadreProxy == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not active or LocalEscadreProxy missing."); return; }
         if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
 
         var shipsInFormation = LocalEscadreProxy.FormationSlots.Where(s => s.ShipEntityId.HasValue).ToList();
-        if (!shipsInFormation.Any()) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ships in formation to rearrange."); return; }
+        if (!shipsInFormation.Any()) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ships in formation."); return; }
 
-        var newLayout = new List<Tuple<int, Vector2>>();
+        var newLayout = new List<Tuple<int, Core.Primitives.Vector2>>();
         float angleStep = 360f / shipsInFormation.Count;
         float radius = 3f + (shipsInFormation.Count * 0.5f);
 
         for (int i = 0; i < shipsInFormation.Count; i++)
         {
             var slot = shipsInFormation[i];
-            float angle = i * angleStep * Mathf.Deg2Rad;
-            newLayout.Add(new Tuple<int, Vector2>(slot.ShipEntityId.Value, new Vector2(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius)));
+            float angle = i * angleStep * Mathf.Deg2Rad; // UnityEngine.Mathf
+            newLayout.Add(new Tuple<int, Core.Primitives.Vector2>(slot.ShipEntityId.Value, new Core.Primitives.Vector2(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius)));
         }
-
         if (newLayout.Any()) _gameActions.RequestSetFormation(newLayout);
-        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No ships with IDs found in local formation state to set.");
     }
 
     [ContextMenu("Command: Attack First Other Escadre")]
@@ -595,21 +666,37 @@ public class ClientComposer : MonoBehaviour
     {
         if (!isSessionFullyActive || LocalEscadreProxy == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Session not active or LocalEscadreProxy missing."); return; }
         if (_gameActions == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] GameActions not initialized."); return; }
+        if (_clientLevel == null) { Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] ClientLevel not init."); return; }
 
         EscadreProxy.ClientProxy targetEscadre = _clientLevel.ActiveProxies.Values
             .OfType<EscadreProxy.ClientProxy>()
-            .FirstOrDefault(ep => ep.EntityId != LocalEscadreProxy.EntityId && ep.OwnerClientId != thisClientInstanceId);
+            .FirstOrDefault(ep => ep.EntityId != LocalEscadreProxy.EntityId && ep.OwnerClientId != thisClientInstanceId && !ep.IsDestroyed);
 
         if (targetEscadre != null)
         {
-            Logger.Log($"[ClientComposer {thisClientInstanceId}] Ordering attack on Escadre Entity ID: {targetEscadre.EntityId} (Owner: {targetEscadre.OwnerClientId})");
             _gameActions.SendAttackEscadre(targetEscadre.EntityId);
+        }
+        else Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No other (non-destroyed) escadres to attack.");
+    }
+
+    public void UICancelAllAttacks()
+    {
+        // _playerInputControllerInstance handles the null check for _gameActions
+        if (_playerInputControllerInstance != null)
+        {
+            _playerInputControllerInstance.RequestCancelAllAttacks();
         }
         else
         {
-            Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] No other escadres found to attack.");
+            Logger.LogWarning($"[ClientComposer] UICancelAllAttacks called, but PlayerInputController instance is not available.");
+            // Fallback if PlayerInputController wasn't instantiated but GameActions is
+            if (GameActions != null && LocalEscadreProxy != null && !LocalEscadreProxy.IsDestroyed) {
+                GameActions.SendCancelAttack();
+                 Logger.Log("[ClientComposer] Fallback UICancelAllAttacks via GameActions directly.");
+            }
         }
     }
+
 
     void OnDestroy()
     {
@@ -621,12 +708,17 @@ public class ClientComposer : MonoBehaviour
             _clientLevel.OnOceanSettingsReceived -= HandleOceanSettingsReceived;
         }
         UnsubscribeFromLocalEscadreEvents();
-        LocalEscadreProxy = null;
+        _localEscadreProxy = null;
+        OnLocalEscadreProxyChanged = null;
 
         _entityManager?.Dispose();
         _entityManager = null;
-        _gameActions = null;
-        _clientClock = null;
+        _gameActions = null; // It's just a reference, not IDisposable
+        _clientClock = null; // Not IDisposable
+
+        if (_commandVisualizerInstance != null) Destroy(_commandVisualizerInstance.gameObject);
+        if (_playerInputControllerInstance != null) Destroy(_playerInputControllerInstance.gameObject);
+
 
         if (clientOceanVisualizer != null && clientOceanVisualizer.gameObject.scene.name != null && clientOceanVisualizer.name.EndsWith("_Instance"))
         {
