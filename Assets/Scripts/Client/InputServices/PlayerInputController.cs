@@ -17,12 +17,24 @@ namespace Client.InputServices
         [Tooltip("Reference to the ClientComposer to access client-side services.")]
         [SerializeField] private ClientComposer clientComposer;
 
+        [Header("Tap Detection Settings")]
+        [Tooltip("Maximum duration for a touch to be considered a tap (seconds).")]
+        [SerializeField] private float maxTapDuration = 0.25f;
+        [Tooltip("Maximum movement distance (squared) for a touch to be considered a tap.")]
+        [SerializeField] private float maxTapMovementSqr = 225f; // 15*15 pixels
+
         private ClientGameActions _gameActions;
         private ClientLevel _clientLevel;
         private EscadreProxy.ClientProxy _localEscadreProxy;
         // private OceanPresentation _oceanPresentation; // Keep if TapResolverService needs dynamic ocean Y
 
         private bool _isInitialized = false;
+
+        // Tap state tracking
+        private Vector2 _touchStartPos;
+        private float _touchStartTime;
+        private bool _isPotentialTap;
+
 
         void Start()
         {
@@ -81,22 +93,84 @@ namespace Client.InputServices
             //    TapResolverService.UpdateOceanPlaneHeight(_oceanPresentation.oceanYLevel);
             // }
 
+            bool tapDetected = false;
+            UnityEngine.Vector3 tapScreenPosition = Vector3.zero;
 
-            if (Input.GetMouseButtonDown(0) || (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began))
+            // Handle Mouse Input (primarily for editor/desktop)
+            if (Input.GetMouseButtonDown(0))
             {
-                int pointerId = Input.touchCount > 0 ? Input.GetTouch(0).fingerId : -1;
-                if (EventSystem.current.IsPointerOverGameObject(pointerId))
+                _isPotentialTap = true;
+                _touchStartPos = Input.mousePosition;
+                _touchStartTime = Time.time;
+            }
+
+            if (Input.GetMouseButtonUp(0) && _isPotentialTap)
+            {
+                _isPotentialTap = false;
+                if (EventSystem.current.IsPointerOverGameObject()) // Check for UI element on mouse up
                 {
                     return;
                 }
 
-                UnityEngine.Vector3 screenPos = Input.mousePosition;
-                if (Input.touchCount > 0)
-                {
-                    screenPos = Input.GetTouch(0).position;
-                }
+                float tapDuration = Time.time - _touchStartTime;
+                float tapMovementSqr = (new Vector2(Input.mousePosition.x, Input.mousePosition.y) - _touchStartPos).sqrMagnitude;
 
-                UnityEngine.Ray ray = mainCamera.ScreenPointToRay(screenPos);
+                if (tapDuration <= maxTapDuration && tapMovementSqr <= maxTapMovementSqr)
+                {
+                    tapDetected = true;
+                    tapScreenPosition = Input.mousePosition;
+                }
+            }
+
+            // Handle Touch Input
+            if (Input.touchCount > 0)
+            {
+                Touch touch = Input.GetTouch(0);
+                if (touch.phase == TouchPhase.Began)
+                {
+                    _isPotentialTap = true;
+                    _touchStartPos = touch.position;
+                    _touchStartTime = Time.time;
+                }
+                else if (touch.phase == TouchPhase.Ended && _isPotentialTap)
+                {
+                    _isPotentialTap = false;
+                    // Pass fingerId for IsPointerOverGameObject when dealing with touch
+                    if (EventSystem.current.IsPointerOverGameObject(touch.fingerId))
+                    {
+                        return;
+                    }
+
+                    float tapDuration = Time.time - _touchStartTime;
+                    float tapMovementSqr = (touch.position - _touchStartPos).sqrMagnitude;
+
+                    if (tapDuration <= maxTapDuration && tapMovementSqr <= maxTapMovementSqr)
+                    {
+                        tapDetected = true;
+                        tapScreenPosition = touch.position;
+                    }
+                }
+                else if (touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
+                {
+                    if (_isPotentialTap) // If still a potential tap, check if it moved too far
+                    {
+                        float tapMovementSqr = (touch.position - _touchStartPos).sqrMagnitude;
+                        if (tapMovementSqr > maxTapMovementSqr)
+                        {
+                            _isPotentialTap = false; // No longer a tap if moved too much
+                        }
+                    }
+                }
+                else if (touch.phase == TouchPhase.Canceled)
+                {
+                    _isPotentialTap = false;
+                }
+            }
+
+
+            if (tapDetected)
+            {
+                UnityEngine.Ray ray = mainCamera.ScreenPointToRay(tapScreenPosition);
 
                 ResolvedTapTarget targetInfo = TapResolverService.Resolve(
                     ray,

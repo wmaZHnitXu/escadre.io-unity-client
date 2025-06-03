@@ -1,10 +1,10 @@
 // File: Scripts/Client/Presentations/DefaultShipPresentation.cs
-using UnityEngine; // Fully qualify: UnityEngine.ParticleSystem, AudioClip, AudioSource, Color, Collider
+using UnityEngine;
 using Core.Network.Proxies;
 using Logger = Core.Logging.Logger; // Alias
 using Client.Presentation; // For ShipTapAreaVisualizer if it's in this namespace
 using Client.InputServices;
-using System.Linq; // For TapResolverService related colors if used dynamically
+using System.Linq;
 
 public class DefaultShipPresentation : ClientProxyPresentation
 {
@@ -16,15 +16,18 @@ public class DefaultShipPresentation : ClientProxyPresentation
     [Header("Tap Area Visualization")]
     [Tooltip("Assign the child ShipTapAreaVisualizer component here if it exists.")]
     [SerializeField] private ShipTapAreaVisualizer tapAreaVisualizer;
-    [SerializeField] private float tapAreaRadius = 2.0f; // Should match TapResolverService SHIP_TAP_RADIUS
+    [SerializeField] private float tapAreaRadius = 2.0f;
     
-    // Colors for different states of the tap area
+    [Tooltip("Color for friendly ships. CHECK INSPECTOR VALUE!")]
     [SerializeField] private Color friendlyTapAreaColor = new Color(0.5f, 1f, 0.5f, 0.3f); // Greenish
+    [Tooltip("Color for enemy ships (not targeted). CHECK INSPECTOR VALUE!")]
     [SerializeField] private Color enemyTapAreaColor = new Color(1f, 0.5f, 0.5f, 0.3f);    // Reddish
+    [Tooltip("Color for enemy ships targeted by player. CHECK INSPECTOR VALUE!")]
     [SerializeField] private Color enemyTargetedTapAreaColor = new Color(1f, 0.2f, 0.2f, 0.5f); // Brighter/Deeper Red
 
     private ShipProxy.ClientProxy _shipProxy;
-    private ClientComposer _clientComposer; // To check local client ID and targeted enemies
+    private ClientComposer _clientComposer;
+    private EscadreProxy.ClientProxy _subscribedLocalEscadreForTargetEvents; // Stores the escadre we're listening to for target changes
 
     protected override void OnInitialized()
     {
@@ -37,7 +40,7 @@ public class DefaultShipPresentation : ClientProxyPresentation
             return;
         }
 
-        _clientComposer = FindObjectOfType<ClientComposer>(); // Common way to get global context
+        _clientComposer = FindObjectOfType<ClientComposer>();
         if (_clientComposer == null)
         {
             Logger.LogWarning($"[DefaultShipPresentation {gameObject.name}] ClientComposer not found in scene. Cannot determine advanced tap area states.");
@@ -46,16 +49,12 @@ public class DefaultShipPresentation : ClientProxyPresentation
         _shipProxy.HealthChanged += OnHealthChanged;
         _shipProxy.CurrentSpeedChanged += OnSpeedChanged;
         _shipProxy.StatsChanged += OnStatsChanged;
-        // If client composer's local escadre proxy changes, we might need to re-evaluate tap area color
+        
         if (_clientComposer != null)
         {
             _clientComposer.OnLocalEscadreProxyChanged += HandleLocalEscadreProxyChangedForTapArea;
-            if (_clientComposer.LocalEscadreProxy != null)
-            {
-                _clientComposer.LocalEscadreProxy.OnTargetEscadreEntityIdsChanged += UpdateTapAreaVisuals;
-            }
+            SubscribeToCurrentLocalEscadreTargetEvents(); // Initial subscription
         }
-
 
         _audioSource = GetComponent<AudioSource>();
         if (_audioSource == null) _audioSource = gameObject.AddComponent<AudioSource>();
@@ -66,28 +65,44 @@ public class DefaultShipPresentation : ClientProxyPresentation
             tapAreaVisualizer = GetComponentInChildren<ShipTapAreaVisualizer>();
         }
         
-        UpdateTapAreaVisuals(); // Initial setup of tap area
+        UpdateTapAreaVisuals(); 
 
         OnHealthChanged(_shipProxy.CurrentHealth, _shipProxy.MaxHealth);
         OnSpeedChanged(_shipProxy.ClientSimulatedSpeed);
         OnStatsChanged();
     }
 
-    private void HandleLocalEscadreProxyChangedForTapArea(EscadreProxy.ClientProxy newLocalEscadreProxy)
+    private void SubscribeToCurrentLocalEscadreTargetEvents()
     {
-        // Unsubscribe from old local escadre's target changes
-        if (_clientComposer != null && _clientComposer.LocalEscadreProxy != null && _clientComposer.LocalEscadreProxy != newLocalEscadreProxy)
+        if (_clientComposer == null) return;
+
+        // Unsubscribe from any previously subscribed escadre
+        if (_subscribedLocalEscadreForTargetEvents != null)
         {
-             _clientComposer.LocalEscadreProxy.OnTargetEscadreEntityIdsChanged -= UpdateTapAreaVisuals;
+            _subscribedLocalEscadreForTargetEvents.OnTargetEscadreEntityIdsChanged -= UpdateTapAreaVisuals;
+            _subscribedLocalEscadreForTargetEvents = null;
         }
-        // Subscribe to new local escadre's target changes
-        if (newLocalEscadreProxy != null)
+
+        // Subscribe to the new one, if it exists
+        if (_clientComposer.LocalEscadreProxy != null)
         {
-            newLocalEscadreProxy.OnTargetEscadreEntityIdsChanged += UpdateTapAreaVisuals;
+            _clientComposer.LocalEscadreProxy.OnTargetEscadreEntityIdsChanged += UpdateTapAreaVisuals;
+            _subscribedLocalEscadreForTargetEvents = _clientComposer.LocalEscadreProxy;
+            Logger.Log($"[DefaultShipPresentation ShipID:{_shipProxy?.EntityId}] Subscribed to OnTargetEscadreEntityIdsChanged for LocalEscadre ID: {_clientComposer.LocalEscadreProxy.EntityId}");
         }
-        UpdateTapAreaVisuals();
+        else
+        {
+            Logger.Log($"[DefaultShipPresentation ShipID:{_shipProxy?.EntityId}] No LocalEscadreProxy to subscribe to for target events.");
+        }
     }
 
+    private void HandleLocalEscadreProxyChangedForTapArea(EscadreProxy.ClientProxy newLocalEscadreProxy)
+    {
+        // ClientComposer's LocalEscadreProxy has changed. Re-evaluate subscriptions and visuals.
+        Logger.Log($"[DefaultShipPresentation ShipID:{_shipProxy?.EntityId}] LocalEscadreProxy changed. New local escadre ID: {(newLocalEscadreProxy != null ? newLocalEscadreProxy.EntityId.ToString() : "NULL")}");
+        SubscribeToCurrentLocalEscadreTargetEvents();
+        UpdateTapAreaVisuals(); 
+    }
 
     private void UpdateTapAreaVisuals()
     {
@@ -95,46 +110,72 @@ public class DefaultShipPresentation : ClientProxyPresentation
 
         bool isFriendly = false;
         bool isTargetedByPlayer = false;
+        
+        string logPrefix = $"[DSP.UpdateTapAreaVisuals ShipID:{_shipProxy.EntityId}] ";
+        System.Text.StringBuilder logBuilder = new System.Text.StringBuilder(logPrefix);
 
-        if (_clientComposer != null && _clientComposer.LocalEscadreProxy != null)
+        logBuilder.Append($"OwnEscClientID:{_shipProxy.OwningEscadreClientId}. ");
+
+        if (_clientComposer != null && _clientComposer.LocalEscadreProxy != null && _clientComposer.ClientLevel != null)
         {
+            logBuilder.Append($"LocalPlayerEscOwnClientID:{_clientComposer.LocalEscadreProxy.OwnerClientId}. ");
             if (_shipProxy.OwningEscadreClientId == _clientComposer.LocalEscadreProxy.OwnerClientId)
             {
                 isFriendly = true;
             }
-            else // It's an enemy ship
+            else 
             {
-                // Check if this ship's escadre is targeted by the local player
-                if (_clientComposer.LocalEscadreProxy.TargetEscadreEntityIds.Contains(_shipProxy.OwningEscadreClientId))
+                EscadreProxy.ClientProxy thisShipsEscadreOwnerProxy = null;
+                foreach (var proxyPair in _clientComposer.ClientLevel.ActiveProxies)
                 {
-                     // This check is slightly off: TargetEscadreEntityIds contains Escadre Entity IDs,
-                     // not OwningEscadreClientId. We need the actual escadre proxy of this ship.
-                     if (_clientComposer.ClientLevel.TryGetProxy(_shipProxy.OwningEscadreClientId, out var escadreIProxy) && escadreIProxy is EscadreProxy.ClientProxy thisShipsEscadre)
-                     {
-                         if (_clientComposer.LocalEscadreProxy.TargetEscadreEntityIds.Contains(thisShipsEscadre.EntityId))
-                         {
-                            isTargetedByPlayer = true;
-                         }
-                     }
+                    if (proxyPair.Value is EscadreProxy.ClientProxy escadre && 
+                        !escadre.IsDestroyed &&
+                        escadre.OwnerClientId == _shipProxy.OwningEscadreClientId) 
+                    {
+                        thisShipsEscadreOwnerProxy = escadre;
+                        break;
+                    }
+                }
+
+                if (thisShipsEscadreOwnerProxy != null)
+                {
+                    logBuilder.Append($"EnemyEscID:{thisShipsEscadreOwnerProxy.EntityId}. ");
+                    if (_clientComposer.LocalEscadreProxy.TargetEscadreEntityIds.Contains(thisShipsEscadreOwnerProxy.EntityId))
+                    {
+                        isTargetedByPlayer = true;
+                    }
+                }
+                else
+                {
+                    logBuilder.Append("EnemyEscProxy:Not Found. ");
                 }
             }
         }
+        else
+        {
+            logBuilder.Append("Composer/LocalEsc/ClientLevel:Missing. ");
+        }
+
+        logBuilder.Append($"isFriendly:{isFriendly}, isTargeted:{isTargetedByPlayer}. ");
+        logBuilder.Append($"ColorVars(F,E,ET): {friendlyTapAreaColor:F3}, {enemyTapAreaColor:F3}, {enemyTargetedTapAreaColor:F3}. ");
 
         Color chosenColor;
         if (isFriendly)
         {
             chosenColor = friendlyTapAreaColor;
+            logBuilder.Append($"Chose:Friendly({chosenColor:F3}).");
         }
-        else // Enemy
+        else 
         {
             chosenColor = isTargetedByPlayer ? enemyTargetedTapAreaColor : enemyTapAreaColor;
+            logBuilder.Append($"Chose:{(isTargetedByPlayer ? "EnemyTargeted" : "Enemy")}({chosenColor:F3}).");
         }
         
+        Logger.Log(logBuilder.ToString());
+        
         tapAreaVisualizer.RefreshVisuals(tapAreaRadius, chosenColor, tapAreaVisualizer.lineWidth);
-        // Visibility can be controlled based on selection state or if it's always visible
         tapAreaVisualizer.SetVisibility(true);
     }
-
 
     private void OnHealthChanged(float current, float max)
     {
@@ -143,7 +184,6 @@ public class DefaultShipPresentation : ClientProxyPresentation
     }
     private void OnSpeedChanged(float speed) { /* ... */ }
     private void OnStatsChanged() { /* ... */ }
-
 
     protected override void HandleLoudDestruction()
     {
@@ -169,10 +209,12 @@ public class DefaultShipPresentation : ClientProxyPresentation
         if (_clientComposer != null)
         {
             _clientComposer.OnLocalEscadreProxyChanged -= HandleLocalEscadreProxyChangedForTapArea;
-            if (_clientComposer.LocalEscadreProxy != null)
-            {
-                _clientComposer.LocalEscadreProxy.OnTargetEscadreEntityIdsChanged -= UpdateTapAreaVisuals;
-            }
+        }
+        if (_subscribedLocalEscadreForTargetEvents != null)
+        {
+            Logger.Log($"[DefaultShipPresentation ShipID:{_shipProxy?.EntityId}] Unsubscribing from OnTargetEscadreEntityIdsChanged for LocalEscadre ID: {_subscribedLocalEscadreForTargetEvents.EntityId}");
+            _subscribedLocalEscadreForTargetEvents.OnTargetEscadreEntityIdsChanged -= UpdateTapAreaVisuals;
+            _subscribedLocalEscadreForTargetEvents = null;
         }
     }
 }
