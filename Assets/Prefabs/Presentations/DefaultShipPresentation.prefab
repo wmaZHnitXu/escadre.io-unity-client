@@ -54,8 +54,9 @@ MonoBehaviour:
   explosionSound: {fileID: 0}
   tapAreaVisualizer: {fileID: 4706518808989184407}
   tapAreaRadius: 5
-  enemyTapAreaColor: {r: 1, g: 1, b: 1, a: 0.3}
   friendlyTapAreaColor: {r: 1, g: 1, b: 1, a: 0.3}
+  enemyTapAreaColor: {r: 1, g: 1, b: 1, a: 0.3}
+  enemyTargetedTapAreaColor: {r: 1, g: 0.2, b: 0.2, a: 0.5}
 --- !u!120 &1965798226732568101
 LineRenderer:
   m_ObjectHideFlags: 0
@@ -170,7 +171,7 @@ MonoBehaviour:
   radius: 2
   segments: 32
   lineColor: {r: 0.5, g: 0.8, b: 1, a: 0.5}
-  lineWidth: 0.1
+  lineWidth: 0.01
   yOffset: 0.05
 --- !u!1 &7552700594079177148
 GameObject:

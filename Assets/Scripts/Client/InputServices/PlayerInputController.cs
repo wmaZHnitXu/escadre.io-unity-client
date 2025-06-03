@@ -5,6 +5,7 @@ using Core.Client;
 using Core.Logging;
 using Core.Network.Proxies;
 using Logger = Core.Logging.Logger; // For EscadreProxy.ClientProxy
+using Client.Presentation; // For OceanPresentation (optional for TapResolverService context)
 
 namespace Client.InputServices
 {
@@ -19,6 +20,7 @@ namespace Client.InputServices
         private ClientGameActions _gameActions;
         private ClientLevel _clientLevel;
         private EscadreProxy.ClientProxy _localEscadreProxy;
+        // private OceanPresentation _oceanPresentation; // Keep if TapResolverService needs dynamic ocean Y
 
         private bool _isInitialized = false;
 
@@ -26,7 +28,8 @@ namespace Client.InputServices
         {
             if (clientComposer != null && mainCamera != null && !_isInitialized)
             {
-                Initialize(clientComposer, mainCamera);
+                OceanPresentation oceanPres = FindObjectOfType<OceanPresentation>(); // Try to find OceanPresentation
+                Initialize(clientComposer, mainCamera, oceanPres);
             }
             else if (clientComposer == null)
             {
@@ -38,27 +41,30 @@ namespace Client.InputServices
             }
         }
 
-        public void Initialize(ClientComposer composer, UnityEngine.Camera cam)
+        public void Initialize(ClientComposer composer, UnityEngine.Camera cam, OceanPresentation oceanPresentation)
         {
             if (_isInitialized) return;
 
             clientComposer = composer ?? throw new System.ArgumentNullException(nameof(composer));
             mainCamera = cam ?? throw new System.ArgumentNullException(nameof(cam));
+            // _oceanPresentation = oceanPresentation; // Store if TapResolverService needs it
 
             _gameActions = clientComposer.GameActions;
             _clientLevel = clientComposer.ClientLevel;
 
-            clientComposer.OnLocalEscadreProxyChanged += (newProxy) => {
-                _localEscadreProxy = newProxy;
-                Logger.Log($"[PlayerInputController] LocalEscadreProxy updated: {(_localEscadreProxy != null ? _localEscadreProxy.EntityId.ToString() : "null")}");
-            };
-            _localEscadreProxy = clientComposer.LocalEscadreProxy;
+            clientComposer.OnLocalEscadreProxyChanged += HandleLocalEscadreProxyChanged;
+            HandleLocalEscadreProxyChanged(clientComposer.LocalEscadreProxy);
 
             if (_gameActions == null) Logger.LogError("[PlayerInputController] GameActions not available from ClientComposer.");
             if (_clientLevel == null) Logger.LogError("[PlayerInputController] ClientLevel not available from ClientComposer.");
 
             _isInitialized = true;
             Logger.Log("[PlayerInputController] Initialized.");
+        }
+        
+        private void HandleLocalEscadreProxyChanged(EscadreProxy.ClientProxy newProxy)
+        {
+            _localEscadreProxy = newProxy;
         }
 
 
@@ -69,12 +75,18 @@ namespace Client.InputServices
                 return;
             }
 
+            // If Ocean Y can change dynamically and TapResolverService needs it:
+            // if (_oceanPresentation != null)
+            // {
+            //    TapResolverService.UpdateOceanPlaneHeight(_oceanPresentation.oceanYLevel);
+            // }
+
+
             if (Input.GetMouseButtonDown(0) || (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began))
             {
-                int pointerId = Input.touchCount > 0 ? Input.GetTouch(0).fingerId : -1; // -1 for mouse
+                int pointerId = Input.touchCount > 0 ? Input.GetTouch(0).fingerId : -1;
                 if (EventSystem.current.IsPointerOverGameObject(pointerId))
                 {
-                    Logger.Log("[PlayerInputController] Tap on UI, ignoring for game world.");
                     return;
                 }
 
@@ -107,25 +119,22 @@ namespace Client.InputServices
             switch (targetInfo.TargetType)
             {
                 case ResolvedTapType.AttackEscadre:
-                    if (targetInfo.HitEscadreProxy != null) // Ensure proxy is valid
+                    if (targetInfo.HitEscadreProxy != null && !targetInfo.HitEscadreProxy.IsDestroyed)
                     {
                         _gameActions.SendAttackEscadre(targetInfo.HitEscadreProxy.EntityId);
                         Logger.Log($"[PlayerInputController] Action: Ordered ATTACK on Escadre {targetInfo.HitEscadreProxy.EntityId}");
                     }
                     else
                     {
-                        Logger.LogError("[PlayerInputController] AttackEscadre resolved but HitEscadreProxy is null.");
+                        Logger.LogError("[PlayerInputController] AttackEscadre resolved but HitEscadreProxy is null or destroyed.");
                     }
                     break;
                 case ResolvedTapType.MoveToPoint:
-                    // targetInfo.HitOceanPoint is Core.Primitives.Vector3
-                    // We need Core.Primitives.Vector2 for SetCourse
                     Core.Primitives.Vector2 courseTarget = new Core.Primitives.Vector2(targetInfo.HitOceanPoint.X, targetInfo.HitOceanPoint.Z);
                     _gameActions.SendSetCourse(courseTarget);
                     Logger.Log($"[PlayerInputController] Action: Ordered MOVE to {courseTarget}");
                     break;
                 case ResolvedTapType.NoTarget:
-                    Logger.Log("[PlayerInputController] Action: Tap resolved to NoTarget. No command issued.");
                     break;
                 default:
                     Logger.LogWarning($"[PlayerInputController] Unhandled ResolvedTapType: {targetInfo.TargetType}");
@@ -142,6 +151,14 @@ namespace Client.InputServices
             }
             _gameActions.SendCancelAttack();
             Logger.Log("[PlayerInputController] Action: Requested CANCEL ALL ATTACKS.");
+        }
+
+        void OnDestroy()
+        {
+            if (clientComposer != null)
+            {
+                clientComposer.OnLocalEscadreProxyChanged -= HandleLocalEscadreProxyChanged;
+            }
         }
     }
 }
