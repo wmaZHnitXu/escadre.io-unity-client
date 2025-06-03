@@ -10,6 +10,7 @@ public class PasswordResetEmailSentUI : UIScreen
     [SerializeField] private Button cancelButton;
     [SerializeField] private Button resendButton;
     [SerializeField] private TMP_Text resendButtonText; // Текст на кнопке "Отправить ещё раз (1:05)"
+    [SerializeField] private Button enterDataButton; // Кнопка "Ввести данные"
 
     private UIManager uiManager;
     private MasterServerApiService masterServerApiService;
@@ -35,6 +36,7 @@ public class PasswordResetEmailSentUI : UIScreen
         cancelButton?.onClick.AddListener(OnCancelButtonClicked);
         resendButton?.onClick.AddListener(OnResendButtonClicked);
         resendButton.interactable = false; // По умолчанию кнопка неактивна, пока идет таймер
+        enterDataButton?.onClick.AddListener(OnEnterDataButtonClicked);
     }
 
     // Метод для установки email, который будет отображаться и использоваться для повторной отправки
@@ -48,6 +50,7 @@ public class PasswordResetEmailSentUI : UIScreen
         base.OnShow();
         Debug.Log("Password Reset Email Sent Screen Shown.");
         StartResendTimer();
+        if(enterDataButton != null) enterDataButton.interactable = true; // Кнопка "Ввести данные" всегда активна здесь
     }
 
     protected override void OnHide()
@@ -63,6 +66,15 @@ public class PasswordResetEmailSentUI : UIScreen
     private void OnCancelButtonClicked()
     {
         uiManager.SwitchToScreen(UIScreenType.RegisteredLogin);
+    }
+
+    private void OnEnterDataButtonClicked()
+    {
+        Debug.Log("Enter Data button clicked. Switching to EnterNewPassword screen.");
+        // Перед переключением, если бы мы получали userId и token (например, из Custom URI),
+        // мы бы вызвали enterNewPasswordScreen.PrepareForPasswordReset(userId, token);
+        // Но так как у нас ручной ввод на следующем экране, просто переключаем.
+        uiManager.SwitchToScreen(UIScreenType.EnterNewPassword);
     }
 
     private async void OnResendButtonClicked()
