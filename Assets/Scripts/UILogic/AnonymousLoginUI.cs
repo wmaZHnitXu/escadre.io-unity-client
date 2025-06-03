@@ -114,11 +114,11 @@ public class AnonymousLoginUI : UIScreen
         loginMethodDropdown.ClearOptions();
         List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>
         {
-            new TMP_Dropdown.OptionData("Без аккаунта"),
-            new TMP_Dropdown.OptionData("С аккаунтом")
+            new TMP_Dropdown.OptionData("С аккаунтом"),
+            new TMP_Dropdown.OptionData("Без аккаунта")
         };
         loginMethodDropdown.AddOptions(options);
-        loginMethodDropdown.SetValueWithoutNotify(0); // "Без аккаунта" по умолчанию
+        loginMethodDropdown.SetValueWithoutNotify(1); // "Без аккаунта" по умолчанию
         loginMethodDropdown.RefreshShownValue();
     }
 
