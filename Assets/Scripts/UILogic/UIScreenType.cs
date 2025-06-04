@@ -15,7 +15,8 @@ namespace Assets.Scripts.UILogic
         EnterNewPassword,         // Скриншот 3: Ввод нового пароля после подтверждения сброса
         AccountNotFound, 
         PlayerStats, 
-        ErrorScreen 
+        ErrorScreen,
+        ShopUI
     }
 }
 

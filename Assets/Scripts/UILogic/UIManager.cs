@@ -19,6 +19,7 @@ public class UIManager : MonoBehaviour
     [SerializeField] private AccountNotFoundUI accountNotFoundScreen;
     [SerializeField] private PlayerStatsUI playerStatsScreen;
     [SerializeField] private ErrorScreenUI errorScreen;
+    [SerializeField] private ShopUI shopScreen;
 
     private UIScreen currentVisibleScreen; // Используем UIScreen
 
@@ -69,6 +70,7 @@ public class UIManager : MonoBehaviour
         if (accountNotFoundScreen != null) accountNotFoundScreen.Hide(true);
         if (playerStatsScreen != null) playerStatsScreen.Hide(true);
         if (errorScreen != null) errorScreen.Hide(true);
+        if (shopScreen != null) shopScreen.Hide(true);
     }
 
     public void SwitchToScreen(UIScreenType screenType, bool hideInstantly = false, Action onSwitched = null)
@@ -154,6 +156,7 @@ public class UIManager : MonoBehaviour
             case UIScreenType.AccountNotFound: return accountNotFoundScreen;
             case UIScreenType.PlayerStats: return playerStatsScreen;
             case UIScreenType.ErrorScreen: return errorScreen;
+            case UIScreenType.ShopUI: return shopScreen;
             
             default:
                 Debug.LogError($"No screen configured for UIScreenType: {screenType}");
