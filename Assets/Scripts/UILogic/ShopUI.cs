@@ -1,87 +1,121 @@
 // Scripts/UI/ShopUI.cs
 using UnityEngine;
 using System.Collections.Generic;
-using Assets.Scripts.UILogic; // Убедитесь, что это пространство имен существует или замените его
+using Assets.Scripts.UILogic; 
 using DG.Tweening;
 using System.Collections;
+using System.Linq; 
 using UnityEngine.UI;
-
-// Если UIScreenType находится в Assets.Scripts.UILogic, можно убрать using Assets.Scripts.UILogic;
-// и использовать полное имя Assets.Scripts.UILogic.UIScreenType.GameUI
-
-public class ShopItemData
-{
-    public string Id;
-    public string Name;
-    public int Cost;
-    public Sprite Icon;
-}
+using Core.Model; 
+using Core.Network.Proxies; 
+using Client.UI; 
+using Logger = Core.Logging.Logger; 
+using Core.Network; // For IClientProxy
 
 public class ShopUI : UIScreen
 {
-    [SerializeField] private Transform contentUpLine;
+    [Header("Shop Layout")]
+    [SerializeField] private Transform contentUpLine; // For Ship Purchases
     [SerializeField] private RectTransform upLine;
-    [SerializeField] private Transform contentDownLine;
+    [SerializeField] private Transform contentDownLine; // For Ship Upgrades
     [SerializeField] private RectTransform downLine;
-    [SerializeField] private GameObject productButtonPrefab;
+    [SerializeField] private GameObject productButtonPrefab; // For Ship Purchases
+    [SerializeField] private GameObject shipUpgradeItemPrefab; 
     [SerializeField] private Button exitButton;
-    [SerializeField] private GameObject score;
+    [SerializeField] private GameObject score; 
 
-    private List<ShopItemData> upLineItems = new List<ShopItemData>();
-    private List<ShopItemData> downLineItems = new List<ShopItemData>();
+    [Header("Item Visuals")]
+    [Tooltip("Default icon if a specific one isn't found for a ship type for purchases.")]
+    [SerializeField] private Sprite defaultShipPurchaseIcon;
+    [Tooltip("Default icon for ships in the upgrade list.")]
+    [SerializeField] private Sprite defaultShipUpgradeIcon; 
 
     [Header("Animation Settings")]
-    public float animationDuration;
+    public float animationDuration = 0.5f; 
     public Ease easeType = Ease.OutExpo;
-
 
     private Vector2 topPanelOnScreenPosition;
     private Vector2 bottomPanelOnScreenPosition;
     private bool positionsInitialized = false;
 
-    private UIManager uiManager;
+    private UIManager uiManager; 
+    private IUIContext _uiContext;
+    private ClientComposer _clientComposer;
+    private EscadreProxy.ClientProxy _localEscadreProxy;
+    
+    private List<ShopItemUI> _activePurchaseItemUIs = new List<ShopItemUI>(); 
+    private List<ShipUpgradeItemUI> _activeUpgradeItemUIs = new List<ShipUpgradeItemUI>(); 
+    private bool _isShopPopulated = false;
+    private bool _refreshPending = false; // Flag to handle refreshes carefully
+
+
+    public void Initialize(IUIContext context)
+    {
+        _uiContext = context;
+        _clientComposer = _uiContext?.GetClientComposer();
+
+        if (_clientComposer == null)
+        {
+            Logger.LogError("[ShopUI] ClientComposer could not be retrieved from IUIContext. Shop will not function.");
+            return;
+        }
+        Logger.Log("[ShopUI] Initialized with ClientComposer.");
+        Hide(true); 
+    }
+
 
     protected override void Awake()
     {
-        base.Awake();
-        uiManager = UIManager.Instance;
+        base.Awake(); 
+        uiManager = UIManager.Instance; 
 
-        Debug.Log("ShopUI Awake: Checking references...");
-        if (contentUpLine == null) Debug.LogError("ShopUI Error: contentUpLine is NOT assigned!");
-        if (upLine == null) Debug.LogError("ShopUI Error: upLine RectTransform is NOT assigned!");
-        if (contentDownLine == null) Debug.LogError("ShopUI Error: contentDownLine is NOT assigned!");
-        if (downLine == null) Debug.LogError("ShopUI Error: downLine RectTransform is NOT assigned!");
-        if (productButtonPrefab == null) Debug.LogError("ShopUI Error: productButtonPrefab is NOT assigned!");
-        if (exitButton == null) Debug.LogError("ShopUI Error: exitButton is NOT assigned!");
-
+        if (contentUpLine == null) Logger.LogError("[ShopUI Error] contentUpLine is NOT assigned!");
+        if (upLine == null) Logger.LogError("[ShopUI Error] upLine RectTransform is NOT assigned!");
+        if (contentDownLine == null) Logger.LogError("[ShopUI Error] contentDownLine is NOT assigned!");
+        if (downLine == null) Logger.LogError("[ShopUI Error] downLine RectTransform is NOT assigned!");
+        if (productButtonPrefab == null) Logger.LogError("[ShopUI Error] productButtonPrefab is NOT assigned!");
+        if (shipUpgradeItemPrefab == null) Logger.LogError("[ShopUI Error] shipUpgradeItemPrefab is NOT assigned!");
+        if (exitButton == null) Logger.LogError("[ShopUI Error] exitButton is NOT assigned!");
 
         exitButton?.onClick.AddListener(OnExitButtonClicked);
-
         StartCoroutine(InitializePanelPositions());
     }
 
     private IEnumerator InitializePanelPositions()
     {
-        yield return new WaitForEndOfFrame();
+        yield return null; 
+        yield return null; 
 
-        if (upLine != null)
+        if (upLine != null && upLine.gameObject.activeInHierarchy) 
         {
             topPanelOnScreenPosition = upLine.anchoredPosition;
-            upLine.anchoredPosition = new Vector2(
-                topPanelOnScreenPosition.x,
-                topPanelOnScreenPosition.y + upLine.rect.height
-            );
-            Debug.Log($"UpLine initial off-screen Y: {upLine.anchoredPosition.y}, height: {upLine.rect.height}");
+             if (upLine.rect.height > 0) { 
+                upLine.anchoredPosition = new Vector2(
+                    topPanelOnScreenPosition.x,
+                    topPanelOnScreenPosition.y + upLine.rect.height
+                );
+             } else {
+                Logger.LogWarning("[ShopUI] upLine rect.height is 0 or invalid. Off-screen positioning might be incorrect.");
+                 upLine.anchoredPosition = new Vector2(topPanelOnScreenPosition.x, topPanelOnScreenPosition.y + 300); 
+             }
+        } else if (upLine == null) {
+            Logger.LogError("[ShopUI] upLine is null in InitializePanelPositions.");
         }
 
-        if (downLine != null)
+        if (downLine != null && downLine.gameObject.activeInHierarchy)
         {
             bottomPanelOnScreenPosition = downLine.anchoredPosition;
-            downLine.anchoredPosition = new Vector2(
-                bottomPanelOnScreenPosition.x,
-                bottomPanelOnScreenPosition.y - downLine.rect.height
-            );
-            Debug.Log($"DownLine initial off-screen Y: {downLine.anchoredPosition.y}, height: {downLine.rect.height}");
+            if(downLine.rect.height > 0) {
+                downLine.anchoredPosition = new Vector2(
+                    bottomPanelOnScreenPosition.x,
+                    bottomPanelOnScreenPosition.y - downLine.rect.height
+                );
+            } else {
+                Logger.LogWarning("[ShopUI] downLine rect.height is 0 or invalid. Off-screen positioning might be incorrect.");
+                downLine.anchoredPosition = new Vector2(bottomPanelOnScreenPosition.x, bottomPanelOnScreenPosition.y - 300); 
+            }
+        } else if (downLine == null) {
+             Logger.LogError("[ShopUI] downLine is null in InitializePanelPositions.");
         }
         positionsInitialized = true;
     }
@@ -90,7 +124,158 @@ public class ShopUI : UIScreen
     protected override void OnShow()
     {
         base.OnShow();
+        if (_clientComposer == null)
+        {
+            Logger.LogError("[ShopUI] OnShow called, but ClientComposer is null. Cannot function.");
+            Hide(true); 
+            return;
+        }
+        
+        _clientComposer.OnLocalEscadreProxyChanged += HandleLocalEscadreProxyChanged;
+        if (_clientComposer.ClientLevel != null) 
+        {
+            _clientComposer.ClientLevel.OnProxyAdded += HandleClientLevelProxyAddedOrRemoved; // Consolidated
+            _clientComposer.ClientLevel.OnProxyRemoved += HandleClientLevelProxyAddedOrRemoved; // Consolidated
+        }
+        HandleLocalEscadreProxyChanged(_clientComposer.LocalEscadreProxy); 
+
         StartCoroutine(ShowSequence());
+    }
+
+    protected override void OnHide()
+    {
+        base.OnHide(); 
+        
+        if (_clientComposer != null)
+        {
+            _clientComposer.OnLocalEscadreProxyChanged -= HandleLocalEscadreProxyChanged;
+            if (_clientComposer.ClientLevel != null) 
+            {
+                _clientComposer.ClientLevel.OnProxyAdded -= HandleClientLevelProxyAddedOrRemoved;
+                _clientComposer.ClientLevel.OnProxyRemoved -= HandleClientLevelProxyAddedOrRemoved;
+            }
+        }
+        if (_localEscadreProxy != null) 
+        {
+            _localEscadreProxy.OnShopDesignsChanged -= ConditionalRefreshPurchaseItemsDisplay;
+            _localEscadreProxy.OnFormationChanged -= ConditionalRefreshUpgradeItemsDisplay;
+            _localEscadreProxy.OnResourcesChanged -= UpdateItemsAffordability;
+        }
+        _isShopPopulated = false;
+    }
+
+    private void HandleLocalEscadreProxyChanged(EscadreProxy.ClientProxy newProxy)
+    {
+        if (_localEscadreProxy != null)
+        {
+            _localEscadreProxy.OnShopDesignsChanged -= ConditionalRefreshPurchaseItemsDisplay;
+            _localEscadreProxy.OnFormationChanged -= ConditionalRefreshUpgradeItemsDisplay;
+            _localEscadreProxy.OnResourcesChanged -= UpdateItemsAffordability;
+        }
+        _localEscadreProxy = newProxy;
+        if (_localEscadreProxy != null)
+        {
+            _localEscadreProxy.OnShopDesignsChanged += ConditionalRefreshPurchaseItemsDisplay;
+            _localEscadreProxy.OnFormationChanged += ConditionalRefreshUpgradeItemsDisplay;
+            _localEscadreProxy.OnResourcesChanged += UpdateItemsAffordability;
+        }
+
+        if (IsVisible)
+        {
+            RequestRefreshShopDisplay(); 
+        }
+    }
+    
+    // Consolidated handler for proxy add/remove from ClientLevel
+    private void HandleClientLevelProxyAddedOrRemoved(IClientProxy proxy)
+    {
+        if (!IsVisible || _localEscadreProxy == null) return;
+
+        if (proxy is ShipProxy.ClientProxy shipProxy)
+        {
+            // Check if this ship belongs to our current local escadre by checking current formation slots
+            bool isOurShipInFormation = _localEscadreProxy.FormationSlots.Any(slot => slot.ShipEntityId.HasValue && slot.ShipEntityId.Value == shipProxy.EntityId);
+            // Also check if it *was* in the UI (for removals where it might already be gone from formation slots)
+            bool wasOurShipInUI = _activeUpgradeItemUIs.Any(uiItem => uiItem.gameObject.name.Contains($"ShipID_{shipProxy.EntityId}"));
+
+            if (isOurShipInFormation || wasOurShipInUI)
+            {
+                // Logger.Log($"[ShopUI] Relevant ShipProxy (ID: {shipProxy.EntityId}) added/removed. Requesting refresh of upgrade items.");
+                RequestRefreshUpgradeItemsDisplay(); // Use the debounced refresh
+            }
+        }
+    }
+
+    private void ConditionalRefreshPurchaseItemsDisplay()
+    {
+        if (IsVisible) RequestRefreshPurchaseItemsDisplay();
+    }
+    private void ConditionalRefreshUpgradeItemsDisplay()
+    {
+        if (IsVisible) RequestRefreshUpgradeItemsDisplay();
+    }
+
+
+    private void RequestRefreshShopDisplay()
+    {
+        if (_refreshPending || !IsVisible) return;
+        StartCoroutine(DebouncedRefreshShopDisplay());
+    }
+    private void RequestRefreshPurchaseItemsDisplay()
+    {
+        if (_refreshPending || !IsVisible) return;
+        StartCoroutine(DebouncedRefreshShopDisplay(true, false));
+    }
+    private void RequestRefreshUpgradeItemsDisplay()
+    {
+        if (_refreshPending || !IsVisible) return;
+        StartCoroutine(DebouncedRefreshShopDisplay(false, true));
+    }
+
+    private IEnumerator DebouncedRefreshShopDisplay(bool refreshPurchases = true, bool refreshUpgrades = true)
+    {
+        _refreshPending = true;
+        yield return null; // Wait one frame to allow other events (like proxy creation) to process
+
+        if (IsVisible) // Double check if still visible after the frame delay
+        {
+            _isShopPopulated = false; 
+            if (refreshPurchases) RefreshPurchaseItemsDisplayInternal();
+            if (refreshUpgrades) RefreshUpgradeItemsDisplayInternal();
+            _isShopPopulated = true;
+            UpdateItemsAffordability(); // Update affordability after items are populated
+        }
+        _refreshPending = false;
+    }
+
+
+    private void UpdateItemsAffordability()
+    {
+        if (_localEscadreProxy == null || !_isShopPopulated) return;
+        int playerResources = _localEscadreProxy.Resources;
+
+        foreach (var itemUI in _activePurchaseItemUIs)
+        {
+            string[] nameParts = itemUI.gameObject.name.Split('_');
+            if (nameParts.Length >= 3 && nameParts[1] == "ID" && int.TryParse(nameParts[2], out int designId))
+            {
+                var matchingDesign = _localEscadreProxy.AvailableShopDesigns.FirstOrDefault(d => d.DesignId == designId);
+                if (matchingDesign != null)
+                {
+                    itemUI.UpdateAffordability(playerResources >= matchingDesign.Cost);
+                }
+            }
+        }
+
+        foreach (var upgradeUI in _activeUpgradeItemUIs)
+        {
+            string[] nameParts = upgradeUI.gameObject.name.Split('_');
+             if (nameParts.Length >=3 && nameParts[1] == "ShipID" && int.TryParse(nameParts[2], out int shipId))
+            {
+                int upgradeCost = CalculateDynamicUpgradeCost(shipId);
+                upgradeUI.UpdateAffordability(playerResources >= upgradeCost);
+            }
+        }
     }
 
     private IEnumerator ShowSequence()
@@ -99,15 +284,10 @@ public class ShopUI : UIScreen
         {
             yield return null;
         }
-
-        Debug.Log("Current Time.timeScale: " + Time.timeScale);
         AnimatePanelsIn();
-
-        Debug.Log("ShopUI OnShow: Loading and populating items...");
-        LoadShopItems();
-        PopulateShopLine(contentUpLine, upLineItems, "UpLine");
-        PopulateShopLine(contentDownLine, downLineItems, "DownLine");
-        score.SetActive(true);
+        if (score != null) score.SetActive(true);
+        RequestRefreshShopDisplay(); 
+        yield break; 
     }
 
     public Sequence AnimatePanelsIn()
@@ -116,19 +296,19 @@ public class ShopUI : UIScreen
         if (upLine != null)
         {
             sequence.Insert(0, upLine.DOAnchorPos(topPanelOnScreenPosition, animationDuration)
-                .SetEase(easeType));
+                .SetEase(easeType).SetUpdate(true)); 
         }
         if (downLine != null)
         {
             sequence.Insert(0, downLine.DOAnchorPos(bottomPanelOnScreenPosition, animationDuration)
-                .SetEase(easeType));
+                .SetEase(easeType).SetUpdate(true)); 
         }
         return sequence;
     }
 
     private void OnExitButtonClicked()
-    {   
-        score.SetActive(false);
+    {
+        if (score != null) score.SetActive(false);
         StartCoroutine(ExitShopCoroutine());
     }
 
@@ -136,7 +316,7 @@ public class ShopUI : UIScreen
     {
         if (uiManager == null)
         {
-            Debug.LogError("UIManager is not available. Cannot switch screen.");
+            Logger.LogError("[ShopUI] UIManager is not available. Cannot switch screen.");
             yield break;
         }
 
@@ -145,7 +325,6 @@ public class ShopUI : UIScreen
         {
             yield return hideAnimation.WaitForCompletion();
         }
-
         uiManager.SwitchToScreen(UIScreenType.GameUI);
     }
 
@@ -153,112 +332,195 @@ public class ShopUI : UIScreen
     {
         if (!positionsInitialized)
         {
-            Debug.LogWarning("Panel positions not yet initialized. Cannot animate out.");
-
-            return DOTween.Sequence();
+            Logger.LogWarning("[ShopUI] Panel positions not initialized. Cannot animate out.");
+            return DOTween.Sequence().SetUpdate(true);
         }
         
-        Sequence sequence = DOTween.Sequence();
+        Sequence sequence = DOTween.Sequence().SetUpdate(true); 
 
         if (upLine != null)
         {
             Vector2 topPanelOffScreenPosition = new Vector2(
                 topPanelOnScreenPosition.x,
-                topPanelOnScreenPosition.y + upLine.rect.height 
+                topPanelOnScreenPosition.y + (upLine.rect.height > 0 ? upLine.rect.height : 300) 
             );
-            sequence.Insert(0, upLine.DOAnchorPos(topPanelOffScreenPosition, 1)); 
+            sequence.Insert(0, upLine.DOAnchorPos(topPanelOffScreenPosition, animationDuration).SetEase(easeType));
         }
 
         if (downLine != null)
         {
             Vector2 bottomPanelOffScreenPosition = new Vector2(
                 bottomPanelOnScreenPosition.x,
-                bottomPanelOnScreenPosition.y - downLine.rect.height 
+                bottomPanelOnScreenPosition.y - (downLine.rect.height > 0 ? downLine.rect.height : 300) 
             );
-
-            sequence.Insert(0, downLine.DOAnchorPos(bottomPanelOffScreenPosition, 1));
+            sequence.Insert(0, downLine.DOAnchorPos(bottomPanelOffScreenPosition, animationDuration).SetEase(easeType));
         }
         return sequence;
     }
 
-    void LoadShopItems()
+    private Sprite GetIconForPurchaseDesign(ShipDesign design)
     {
-        /* TODO: Upload sprites */
-        Debug.Log("ShopUI LoadShopItems: Starting to load items...");
-        upLineItems.Clear();
-        downLineItems.Clear();
-
-        for (int i = 0; i < 8; i++)
-        {
-            upLineItems.Add(new ShopItemData { 
-                Id = $"up_ship_{i+1}", Name = $"Корабль Верхний {i+1}", Cost = 1000 + i * 100, Icon = null 
-            });
-            downLineItems.Add(new ShopItemData { 
-                Id = $"down_ship_{i+1}", Name = $"Корабль Нижний {i+1}", Cost = 1500 + i * 150, Icon = null
-            });
-        }
-        if (upLineItems.Count > 0) upLineItems[0].Cost = 1337;
-        if (downLineItems.Count > 0) downLineItems[0].Cost = 1337;
-        Debug.Log($"ShopUI LoadShopItems: Loaded {upLineItems.Count} items for up line, {downLineItems.Count} for down line.");
+        return defaultShipPurchaseIcon;
     }
 
-    void PopulateShopLine(Transform contentParent, List<ShopItemData> items, string lineName)
+    private Sprite GetIconForUpgradeShip(ShipProxy.ClientProxy shipProxy)
     {
-        Debug.Log($"ShopUI PopulateShopLine for {lineName}: Checking prerequisites...");
-        if (contentParent == null || productButtonPrefab == null)
+        return defaultShipUpgradeIcon;
+    }
+
+
+    private void RefreshPurchaseItemsDisplayInternal()
+    {
+        if (_localEscadreProxy == null)
         {
-            Debug.LogError($"ShopUI PopulateShopLine for {lineName}: Content parent or product button prefab is not assigned! Aborting population for this line.");
+            ClearShopLine(contentUpLine, "UpLine_Purchases", _activePurchaseItemUIs);
             return;
         }
-        // Debug.Log($"ShopUI PopulateShopLine for {lineName}: Parent '{contentParent.name}' is active in hierarchy: {contentParent.gameObject.activeInHierarchy}");
-        // Debug.Log($"ShopUI PopulateShopLine for {lineName}: Prefab '{productButtonPrefab.name}' is assigned.");
+        List<ShipDesign> allDesigns = _localEscadreProxy.AvailableShopDesigns;
+        if (allDesigns == null || !allDesigns.Any())
+        {
+            ClearShopLine(contentUpLine, "UpLine_Purchases", _activePurchaseItemUIs);
+            return;
+        }
+        PopulatePurchaseItemsLine(contentUpLine, allDesigns, "UpLine_Purchases");
+    }
 
-        // Debug.Log($"ShopUI PopulateShopLine for {lineName}: Clearing {contentParent.childCount} existing children from {contentParent.name}...");
+    private void RefreshUpgradeItemsDisplayInternal()
+    {
+        if (_localEscadreProxy == null || _clientComposer == null || _clientComposer.ClientLevel == null)
+        {
+            ClearShopLine(contentDownLine, "DownLine_Upgrades", _activeUpgradeItemUIs);
+            return;
+        }
+        List<ShipProxy.ClientProxy> playerShips = _localEscadreProxy.FormationSlots
+            .Where(slot => slot.ShipEntityId.HasValue)
+            .Select(slot => {
+                _clientComposer.ClientLevel.TryGetProxy(slot.ShipEntityId.Value, out var proxy);
+                return proxy as ShipProxy.ClientProxy;
+            })
+            .Where(shipProxy => shipProxy != null && !shipProxy.IsDestroyed)
+            .ToList();
+
+        if (!playerShips.Any())
+        {
+            ClearShopLine(contentDownLine, "DownLine_Upgrades", _activeUpgradeItemUIs);
+            return;
+        }
+        PopulateUpgradeItemsLine(contentDownLine, playerShips, "DownLine_Upgrades");
+    }
+
+    
+    void ClearShopLine<T>(Transform contentParent, string lineName, List<T> activeItemsList) where T : MonoBehaviour
+    {
+        if (contentParent == null) return;
         foreach (Transform child in contentParent)
         {
             Destroy(child.gameObject);
         }
+        activeItemsList.Clear();
+    }
 
-        // Debug.Log($"ShopUI PopulateShopLine for {lineName}: Populating with {items.Count} items...");
-        if (items.Count == 0)
+    void PopulatePurchaseItemsLine(Transform contentParent, List<ShipDesign> designs, string lineName)
+    {
+        if (contentParent == null || productButtonPrefab == null)
         {
-            Debug.LogWarning($"ShopUI PopulateShopLine for {lineName}: No items to populate.");
+            Logger.LogError($"[ShopUI] PopulatePurchaseItemsLine for {lineName}: Missing contentParent or productButtonPrefab.");
             return;
         }
+        ClearShopLine(contentParent, lineName, _activePurchaseItemUIs); // Already cleared by internal caller
 
-        foreach (var itemData in items)
+        if (!designs.Any()) return;
+
+        int playerResources = _localEscadreProxy?.Resources ?? 0;
+
+        foreach (var design in designs)
         {
-            // Debug.Log($"ShopUI PopulateShopLine for {lineName}: Instantiating prefab for item ID: {itemData.Id}");
             GameObject itemGO = Instantiate(productButtonPrefab, contentParent);
-            if (itemGO == null)
-            {
-                Debug.LogError($"ShopUI PopulateShopLine for {lineName}: Failed to instantiate prefab for item ID: {itemData.Id}!");
-                continue;
-            }
-            itemGO.name = $"ShopItem_{itemData.Id}";
-            // Debug.Log($"ShopUI PopulateShopLine for {lineName}: Instantiated '{itemGO.name}', parent: '{itemGO.transform.parent?.name}', active: {itemGO.activeSelf}");
-
+            itemGO.name = $"PurchaseItem_ID_{design.DesignId}_{design.Name.Replace(" ", "")}";
 
             ShopItemUI itemUI = itemGO.GetComponent<ShopItemUI>();
             if (itemUI != null)
             {
-                // Debug.Log($"ShopUI PopulateShopLine for {lineName}: Setting up UI for item ID: {itemData.Id}");
-                itemUI.Setup(
-                    itemData.Id, itemData.Icon, itemData.Name, 
-                    itemData.Cost.ToString("N0"), HandleItemPurchase
-                );
+                bool canAfford = playerResources >= design.Cost;
+                itemUI.Setup(design, GetIconForPurchaseDesign(design), HandlePurchaseItemClick, canAfford);
+                _activePurchaseItemUIs.Add(itemUI);
             }
             else
             {
-                Debug.LogError($"ShopUI PopulateShopLine for {lineName}: ShopItemUI script not found on instantiated prefab for item ID: {itemData.Id}!");
+                Logger.LogError($"[ShopUI] PopulatePurchaseItemsLine for {lineName}: ShopItemUI script not found on prefab for design ID: {design.DesignId}!");
             }
         }
-        // Debug.Log($"ShopUI PopulateShopLine for {lineName}: Finished populating.");
     }
-    void HandleItemPurchase(string itemId)
+    
+    void PopulateUpgradeItemsLine(Transform contentParent, List<ShipProxy.ClientProxy> ships, string lineName) 
     {
-        
-        Debug.Log($"ShopUI: Attempting to purchase item with ID: {itemId}");
-        // TODO: Implement the purchase logic
+        if (contentParent == null || shipUpgradeItemPrefab == null)
+        {
+            Logger.LogError($"[ShopUI] PopulateUpgradeItemsLine for {lineName}: Missing contentParent or shipUpgradeItemPrefab.");
+            return;
+        }
+        ClearShopLine(contentParent, lineName, _activeUpgradeItemUIs); // Already cleared by internal caller
+
+        if (!ships.Any()) return;
+
+        int playerResources = _localEscadreProxy?.Resources ?? 0;
+
+        foreach (var shipProxy in ships)
+        {
+            GameObject itemGO = Instantiate(shipUpgradeItemPrefab, contentParent);
+            itemGO.name = $"UpgradeItem_ShipID_{shipProxy.EntityId}";
+
+            ShipUpgradeItemUI itemUI = itemGO.GetComponent<ShipUpgradeItemUI>();
+            if (itemUI != null)
+            {
+                int upgradeCost = CalculateDynamicUpgradeCost(shipProxy.EntityId); 
+                bool canAfford = playerResources >= upgradeCost;
+                itemUI.Setup(shipProxy, GetIconForUpgradeShip(shipProxy), HandleUpgradeItemClick, canAfford, upgradeCost);
+                _activeUpgradeItemUIs.Add(itemUI);
+            }
+            else
+            {
+                Logger.LogError($"[ShopUI] PopulateUpgradeItemsLine for {lineName}: ShipUpgradeItemUI script not found on prefab for Ship ID: {shipProxy.EntityId}!");
+            }
+        }
+    }
+
+    private int CalculateDynamicUpgradeCost(int shipEntityId)
+    {
+        return 750; 
+    }
+
+    void HandlePurchaseItemClick(string designIdString)
+    {
+        if (_clientComposer == null || _clientComposer.GameActions == null || _localEscadreProxy == null || _localEscadreProxy.IsDestroyed)
+        {
+            Logger.LogError("[ShopUI] Cannot handle purchase: Critical components missing or proxy destroyed.");
+            return;
+        }
+        if (int.TryParse(designIdString, out int designId))
+        {
+            Logger.Log($"[ShopUI] Attempting to purchase item with Design ID: {designId}");
+            float yOffset = _localEscadreProxy.FormationSlots.Count * 2.5f;
+            if (_localEscadreProxy.FormationSlots.Count % 2 == 1) yOffset *= -1;
+            Core.Primitives.Vector2 preferredOffset = new Core.Primitives.Vector2(
+                _localEscadreProxy.FormationSlots.Count * 1.0f, yOffset
+            );
+            _clientComposer.GameActions.RequestBuyShip(designId, preferredOffset);
+        }
+        else
+        {
+            Logger.LogError($"[ShopUI] Could not parse designIdString '{designIdString}' for purchase.");
+        }
+    }
+    
+    void HandleUpgradeItemClick(int shipEntityId) 
+    {
+        if (_clientComposer == null || _clientComposer.GameActions == null || _localEscadreProxy == null || _localEscadreProxy.IsDestroyed)
+        {
+            Logger.LogError("[ShopUI] Cannot handle upgrade: Critical components missing or proxy destroyed.");
+            return;
+        }
+        Logger.Log($"[ShopUI] Attempting to upgrade ship with Entity ID: {shipEntityId}");
+        _clientComposer.GameActions.RequestUpgradeShip(shipEntityId);
     }
 }

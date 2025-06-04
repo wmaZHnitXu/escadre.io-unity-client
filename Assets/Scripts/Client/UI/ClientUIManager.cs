@@ -2,7 +2,7 @@
 using UnityEngine;
 using Logger = Core.Logging.Logger;
 using System.Collections.Generic; // For List
-using Client.UI.Formation; // For FormationUI
+using Client.UI.Formation; 
 
 namespace Client.UI
 {
@@ -11,15 +11,17 @@ namespace Client.UI
         [Header("Core Dependencies")]
         [SerializeField] private ClientComposer clientComposer; // Must be assigned
 
-        [Header("UI Controllers/Displays")]
+        [Header("UI Screens & Displays")] // Renamed for clarity
         [Tooltip("Manages displaying player resources.")]
         [SerializeField] private ResourceDisplay resourceDisplay;
         [Tooltip("Manages showing/hiding UI groups based on session state (Loading, Gameplay, Game Over).")]
         [SerializeField] private SessionStateDisplay sessionStateDisplay;
         
-        // Changed from FormationUIMediator to FormationUI
         [Tooltip("Manages the formation editing UI window.")]
-        [SerializeField] private FormationUI formationUIScreen; // <<<< MODIFIED HERE
+        [SerializeField] private FormationUI formationUIScreen; 
+        
+        [Tooltip("Manages the shop UI window.")] // <<<< NEW
+        [SerializeField] private ShopUI shopUIScreen;        // <<<< NEW
 
 
         [Header("Action Button Handlers")]
@@ -39,6 +41,7 @@ namespace Client.UI
 
         void Start()
         {
+            // Populate allActionHandlers if empty, for easier Inspector setup
             if (allActionHandlers.Count == 0)
             {
                 if (cancelAttackButtonHandler != null) allActionHandlers.Add(cancelAttackButtonHandler);
@@ -64,9 +67,12 @@ namespace Client.UI
             if (sessionStateDisplay != null) sessionStateDisplay.Initialize(this);
             else Logger.LogWarning("[ClientUIManager] SessionStateDisplay not assigned.");
 
-            // Initialize FormationUI screen
-            if (formationUIScreen != null) formationUIScreen.Initialize(this); // <<<< MODIFIED HERE
+            // Initialize UI Screens
+            if (formationUIScreen != null) formationUIScreen.Initialize(this); 
             else Logger.LogWarning("[ClientUIManager] FormationUIScreen not assigned.");
+
+            if (shopUIScreen != null) shopUIScreen.Initialize(this); // <<<< NEW INITIALIZATION
+            else Logger.LogWarning("[ClientUIManager] ShopUIScreen not assigned.");
 
 
             // Initialize all action button handlers
@@ -78,7 +84,7 @@ namespace Client.UI
                     else Logger.LogWarning("[ClientUIManager] Found a null entry in allActionHandlers list.");
                 }
             }
-            else 
+            else // Fallback if list wasn't populated for some reason or not used
             {
                 if (cancelAttackButtonHandler != null) cancelAttackButtonHandler.Initialize(this);
                 else Logger.LogWarning("[ClientUIManager] CancelAttackButtonHandler not assigned.");
@@ -105,6 +111,7 @@ namespace Client.UI
         void OnDestroy()
         {
             // Cleanup if necessary
+            // For example, if screens needed explicit cleanup that's not handled by their own OnDestroy
         }
     }
 }

@@ -16,6 +16,7 @@ namespace Client.UI
     {
         [Header("UI Elements")]
         [SerializeField] private TextMeshProUGUI resourcesText;
+        [SerializeField] private TextMeshProUGUI resourcesText2;
 
         private EscadreProxy.ClientProxy _localEscadreProxy;
         private ClientComposer _clientComposer;
@@ -78,7 +79,8 @@ namespace Client.UI
 
             if (_localEscadreProxy != null)
             {
-                resourcesText.text = $"{_localEscadreProxy.Resources}";
+                resourcesText.text = _localEscadreProxy.Resources.ToString();
+                resourcesText2.text = _localEscadreProxy.Resources.ToString();
             }
             else
             {
