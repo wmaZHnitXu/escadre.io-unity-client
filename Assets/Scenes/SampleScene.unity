@@ -399,6 +399,26 @@ MonoBehaviour:
     PresentationPrefab: {fileID: 7725221443816437972, guid: 425bcf3f5493ca8489446489795ca4f1,
       type: 3}
     Factory: {fileID: 411430314}
+  - EntityType: 6
+    PresentationPrefab: {fileID: 4072574768428514914, guid: f8923917fad70da45b52d6608781c1ae,
+      type: 3}
+    Factory: {fileID: 411430314}
+  - EntityType: 7
+    PresentationPrefab: {fileID: 4072574768428514914, guid: cfc36c93643275a479adf02a3b559d7b,
+      type: 3}
+    Factory: {fileID: 411430314}
+  - EntityType: 8
+    PresentationPrefab: {fileID: 4072574768428514914, guid: 9d9f7468c7de728439fcdadf7be3d81b,
+      type: 3}
+    Factory: {fileID: 411430314}
+  - EntityType: 9
+    PresentationPrefab: {fileID: 4072574768428514914, guid: 49831cc9537a455429198a1940fb60ec,
+      type: 3}
+    Factory: {fileID: 411430314}
+  - EntityType: 10
+    PresentationPrefab: {fileID: 4072574768428514914, guid: 61341525a9179d7429bdb25a39394a70,
+      type: 3}
+    Factory: {fileID: 411430314}
   presentationParent: {fileID: 0}
 --- !u!114 &411430314
 MonoBehaviour:
@@ -782,6 +802,21 @@ MonoBehaviour:
       type: 3}
   - EntityType: 4
     DebugPrefab: {fileID: 5066656195200630647, guid: 09520f4879fa2aa40a339adc3712d12a,
+      type: 3}
+  - EntityType: 6
+    DebugPrefab: {fileID: 4379563721390693257, guid: c3f637b77b6d5f24097825ead714a26f,
+      type: 3}
+  - EntityType: 7
+    DebugPrefab: {fileID: 4379563721390693257, guid: c3f637b77b6d5f24097825ead714a26f,
+      type: 3}
+  - EntityType: 8
+    DebugPrefab: {fileID: 4379563721390693257, guid: c3f637b77b6d5f24097825ead714a26f,
+      type: 3}
+  - EntityType: 9
+    DebugPrefab: {fileID: 4379563721390693257, guid: c3f637b77b6d5f24097825ead714a26f,
+      type: 3}
+  - EntityType: 10
+    DebugPrefab: {fileID: 4379563721390693257, guid: c3f637b77b6d5f24097825ead714a26f,
       type: 3}
   debugObjectParent: {fileID: 0}
 --- !u!114 &709566213

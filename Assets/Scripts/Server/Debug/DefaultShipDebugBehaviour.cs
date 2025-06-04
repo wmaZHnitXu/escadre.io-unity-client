@@ -22,11 +22,11 @@ public class DefaultShipDebugBehaviour : DestructibleEntityDebugBehaviour
     public Color movementTargetLineColor = Color.yellow;
 
 
-    protected DefaultShip TargetDefaultShip => _targetEntity as DefaultShip;
+    protected Ship TargetDefaultShip => _targetEntity as Ship;
 
     public override void Initialize(Entity entity)
     {
-        if (entity is DefaultShip defaultShip) {
+        if (entity is Ship defaultShip) {
             base.Initialize(defaultShip);
         } else {
             Logger.LogError($"[DefaultShipDebugBehaviour] Incorrect entity type: {entity?.GetType().Name}. Expected DefaultShip.");
