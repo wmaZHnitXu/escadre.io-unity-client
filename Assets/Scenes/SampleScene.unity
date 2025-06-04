@@ -2205,7 +2205,6 @@ PrefabInstance:
       propertyPath: m_IsActive
       value: 1
       objectReference: {fileID: 0}
-<<<<<<< Updated upstream
     - target: {fileID: 7146574427389220662, guid: c9295408145e1054486d77b817bfd087,
         type: 3}
       propertyPath: m_AnchorMax.x
@@ -2237,19 +2236,10 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 7146574427617212923, guid: c9295408145e1054486d77b817bfd087,
-=======
-    - target: {fileID: 7146574427414607833, guid: c9295408145e1054486d77b817bfd087,
-        type: 3}
-      propertyPath: shopScreen
-      value: 
-      objectReference: {fileID: 1138026297}
-    - target: {fileID: 7146574427789148771, guid: c9295408145e1054486d77b817bfd087,
->>>>>>> Stashed changes
         type: 3}
       propertyPath: m_SizeDelta.x
       value: 0
       objectReference: {fileID: 0}
-<<<<<<< Updated upstream
     - target: {fileID: 7146574427991594708, guid: c9295408145e1054486d77b817bfd087,
         type: 3}
       propertyPath: m_AnchorMax.x
@@ -2264,42 +2254,6 @@ PrefabInstance:
         type: 3}
       propertyPath: m_AnchorMin.y
       value: 0.0000057816505
-=======
-    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
-        type: 3}
-      propertyPath: m_Spacing
-      value: 15
-      objectReference: {fileID: 0}
-    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
-        type: 3}
-      propertyPath: m_Padding.m_Left
-      value: 10
-      objectReference: {fileID: 0}
-    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
-        type: 3}
-      propertyPath: m_Padding.m_Right
-      value: 10
-      objectReference: {fileID: 0}
-    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
-        type: 3}
-      propertyPath: m_ChildControlWidth
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
-        type: 3}
-      propertyPath: m_ChildControlHeight
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
-        type: 3}
-      propertyPath: m_ChildForceExpandWidth
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
-        type: 3}
-      propertyPath: m_ChildForceExpandHeight
-      value: 0
->>>>>>> Stashed changes
       objectReference: {fileID: 0}
     - target: {fileID: 7624852893971564950, guid: c9295408145e1054486d77b817bfd087,
         type: 3}
