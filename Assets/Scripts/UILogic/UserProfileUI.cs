@@ -102,7 +102,7 @@ public class UserProfileUI : UIScreen
     private void OnPlayButtonClicked()
     {
         Debug.Log($"Login successful! User: {SessionManager.Instance?.CurrentUser?.Nickname}");
-        uiManager.SwitchToScreen(UIScreenType.GameUI); // Или UIScreenType.MainMenu
+        DuctTape.Instance.GoPlayTheGame();
     }
     
     private void InitializeLoginMethodDropdown()

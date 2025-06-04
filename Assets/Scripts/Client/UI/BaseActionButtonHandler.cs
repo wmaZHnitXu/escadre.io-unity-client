@@ -9,7 +9,7 @@ namespace Client.UI
     [RequireComponent(typeof(Button))]
     public abstract class BaseActionButtonHandler : MonoBehaviour
     {
-        protected Button _button;
+        [SerializeField] protected Button _button;
         protected ClientComposer _clientComposer;
         protected EscadreProxy.ClientProxy _localEscadreProxy; // Made protected for access by derived
         private bool _isHandlerInitialized = false;

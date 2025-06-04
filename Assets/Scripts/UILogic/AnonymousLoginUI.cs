@@ -14,6 +14,7 @@ public class AnonymousLoginUI : UIScreen
     [SerializeField] private TMP_Dropdown loginMethodDropdown;
     [SerializeField] private TMP_Dropdown serverDropdown; // Если нужен выбор сервера для анонимов
 
+
     private UIManager uiManager;
     // private ServerListService serverListService; // Если сервер-лист нужен здесь
 
@@ -94,7 +95,8 @@ public class AnonymousLoginUI : UIScreen
             Debug.Log($"Anonymous login successful! User: {SessionManager.Instance?.CurrentUser?.Nickname}");
             // SessionManager уже должен был создать сессию внутри GetAnonymousTokenAsync в MasterServerApiService
             // Переключаемся на следующий экран (например, главное меню или лобби)
-            uiManager.SwitchToScreen(UIScreenType.GameUI); // Или UIScreenType.MainMenu
+            //uiManager.SwitchToScreen(UIScreenType.GameUI); // Или UIScreenType.MainMenu
+            DuctTape.Instance.GoPlayTheGame();
         }
         else
         {

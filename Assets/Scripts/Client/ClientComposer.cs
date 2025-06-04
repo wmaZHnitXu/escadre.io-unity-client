@@ -524,10 +524,8 @@ public class ClientComposer : MonoBehaviour
     private void HandleResourcesChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Resources updated. Amount: {LocalEscadreProxy.Resources}"); }
     private void HandleNicknameChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Nickname updated. Value: '{LocalEscadreProxy.Nickname}'"); }
 
-
-    void OnEnable()
+    public void ConnectToTheServer()
     {
-        Logger.Log($"[ClientComposer {thisClientInstanceId}] OnEnable called.");
         if (!isConnectionAttempted && !IsSessionFullyActive) RequestConnection();
         else if (isConnectionAttempted && !IsSessionFullyActive) Logger.LogWarning($"[ClientComposer {thisClientInstanceId}] Connection previously attempted but session not fully active. Waiting for server data.");
     }
