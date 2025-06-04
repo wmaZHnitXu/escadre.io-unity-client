@@ -1794,6 +1794,18 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1131455446}
   m_CullTransparentMesh: 1
+--- !u!114 &1138026297 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 7146574427314125461, guid: c9295408145e1054486d77b817bfd087,
+    type: 3}
+  m_PrefabInstance: {fileID: 1302650830}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5d240b191d8340b44a85f4683f285d80, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1202013258
 GameObject:
   m_ObjectHideFlags: 0
@@ -2050,8 +2062,53 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7146574426402283106, guid: c9295408145e1054486d77b817bfd087,
         type: 3}
+      propertyPath: m_SizeDelta.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574426402283106, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
       propertyPath: m_AnchoredPosition.x
-      value: 0.00005767688
+      value: -0.00006767909
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574426402283108, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_Spacing
+      value: 15
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574426402283108, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_Padding.m_Left
+      value: 10
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574426402283108, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_Padding.m_Right
+      value: 10
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574426402283108, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_ChildControlWidth
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574426402283108, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_ChildControlHeight
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574426402283108, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_ChildForceExpandWidth
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574426402283108, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_ChildForceExpandHeight
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574426465516764, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 7146574426430219553, guid: c9295408145e1054486d77b817bfd087,
         type: 3}
@@ -2148,6 +2205,7 @@ PrefabInstance:
       propertyPath: m_IsActive
       value: 1
       objectReference: {fileID: 0}
+<<<<<<< Updated upstream
     - target: {fileID: 7146574427389220662, guid: c9295408145e1054486d77b817bfd087,
         type: 3}
       propertyPath: m_AnchorMax.x
@@ -2179,10 +2237,19 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 7146574427617212923, guid: c9295408145e1054486d77b817bfd087,
+=======
+    - target: {fileID: 7146574427414607833, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: shopScreen
+      value: 
+      objectReference: {fileID: 1138026297}
+    - target: {fileID: 7146574427789148771, guid: c9295408145e1054486d77b817bfd087,
+>>>>>>> Stashed changes
         type: 3}
       propertyPath: m_SizeDelta.x
       value: 0
       objectReference: {fileID: 0}
+<<<<<<< Updated upstream
     - target: {fileID: 7146574427991594708, guid: c9295408145e1054486d77b817bfd087,
         type: 3}
       propertyPath: m_AnchorMax.x
@@ -2197,6 +2264,42 @@ PrefabInstance:
         type: 3}
       propertyPath: m_AnchorMin.y
       value: 0.0000057816505
+=======
+    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_Spacing
+      value: 15
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_Padding.m_Left
+      value: 10
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_Padding.m_Right
+      value: 10
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_ChildControlWidth
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_ChildControlHeight
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_ChildForceExpandWidth
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7146574427789148773, guid: c9295408145e1054486d77b817bfd087,
+        type: 3}
+      propertyPath: m_ChildForceExpandHeight
+      value: 0
+>>>>>>> Stashed changes
       objectReference: {fileID: 0}
     - target: {fileID: 7624852893971564950, guid: c9295408145e1054486d77b817bfd087,
         type: 3}
