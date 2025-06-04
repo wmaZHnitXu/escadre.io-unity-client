@@ -524,6 +524,7 @@ public class ClientComposer : MonoBehaviour
     private void HandleResourcesChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Resources updated. Amount: {LocalEscadreProxy.Resources}"); }
     private void HandleNicknameChanged_Debug() { if (LocalEscadreProxy == null) return; Logger.Log($"[ClientComposer {thisClientInstanceId} DEBUG] Nickname updated. Value: '{LocalEscadreProxy.Nickname}'"); }
 
+    [ContextMenu("Connect")]
     public void ConnectToTheServer()
     {
         if (!isConnectionAttempted && !IsSessionFullyActive) RequestConnection();
