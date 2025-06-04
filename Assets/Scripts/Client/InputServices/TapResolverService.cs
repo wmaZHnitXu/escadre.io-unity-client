@@ -25,7 +25,7 @@ namespace Client.InputServices
 
     public static class TapResolverService
     {
-        private const float SHIP_TAP_RADIUS = 2.0f; // Consider making this configurable or fetched
+        private const float SHIP_TAP_RADIUS = 4.0f; // Consider making this configurable or fetched
         private static UnityEngine.Plane _oceanPlane = new UnityEngine.Plane(UnityEngine.Vector3.up, 0);
 
         // Call this if the ocean's Y level can change dynamically
