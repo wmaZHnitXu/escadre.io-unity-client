@@ -2,17 +2,15 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using System; // Для Action
-
+using System;
 public class ShopItemUI : MonoBehaviour
 {
     [SerializeField] private Image productImage;
-    //[SerializeField] private TMP_Text productNameText; // Если есть имя на кнопке
     [SerializeField] private TMP_Text productCostText;
-    [SerializeField] private Button purchaseButton; // Сама кнопка, на которой висит скрипт
+    [SerializeField] private Button purchaseButton;
 
-    private string itemId; // ID товара/корабля
-    private Action<string> onPurchaseClicked; // Событие для обработки покупки
+    private string itemId;
+    private Action<string> onPurchaseClicked;
 
     private void Awake()
     {

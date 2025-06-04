@@ -2,7 +2,7 @@
 using UnityEngine;
 using Logger = Core.Logging.Logger;
 using System.Collections.Generic; // For List
-using Client.UI.Formation; // For FormationUIMediator
+using Client.UI.Formation; // For FormationUI
 
 namespace Client.UI
 {
@@ -16,8 +16,10 @@ namespace Client.UI
         [SerializeField] private ResourceDisplay resourceDisplay;
         [Tooltip("Manages showing/hiding UI groups based on session state (Loading, Gameplay, Game Over).")]
         [SerializeField] private SessionStateDisplay sessionStateDisplay;
+        
+        // Changed from FormationUIMediator to FormationUI
         [Tooltip("Manages the formation editing UI window.")]
-        [SerializeField] private FormationUIMediator formationUIMediator;
+        [SerializeField] private FormationUI formationUIScreen; // <<<< MODIFIED HERE
 
 
         [Header("Action Button Handlers")]
@@ -62,8 +64,9 @@ namespace Client.UI
             if (sessionStateDisplay != null) sessionStateDisplay.Initialize(this);
             else Logger.LogWarning("[ClientUIManager] SessionStateDisplay not assigned.");
 
-            if (formationUIMediator != null) formationUIMediator.Initialize(this);
-            else Logger.LogWarning("[ClientUIManager] FormationUIMediator not assigned.");
+            // Initialize FormationUI screen
+            if (formationUIScreen != null) formationUIScreen.Initialize(this); // <<<< MODIFIED HERE
+            else Logger.LogWarning("[ClientUIManager] FormationUIScreen not assigned.");
 
 
             // Initialize all action button handlers

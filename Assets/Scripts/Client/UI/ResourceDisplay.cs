@@ -68,7 +68,7 @@ namespace Client.UI
             else
             {
                 // Handle case where there's no local escadre (e.g., show "N/A" or hide)
-                if (resourcesText != null) resourcesText.text = "Resources: N/A";
+                if (resourcesText != null) resourcesText.text = "N/A";
             }
         }
 
@@ -78,11 +78,11 @@ namespace Client.UI
 
             if (_localEscadreProxy != null)
             {
-                resourcesText.text = $"Resources: {_localEscadreProxy.Resources}";
+                resourcesText.text = $"{_localEscadreProxy.Resources}";
             }
             else
             {
-                resourcesText.text = "Resources: N/A";
+                resourcesText.text = "N/A";
             }
         }
 

@@ -12,7 +12,7 @@ namespace Client.UI.Formation
         [SerializeField] private Image backgroundImage; // Optional: for visual feedback (e.g., selected)
         [SerializeField] private TextMeshProUGUI shipInfoText; // Optional: display ship ID or short type
 
-        private FormationUIMediator _mediator;
+        private FormationUI _formationUIScreen; // Changed from FormationUIMediator
         private int _shipEntityId;
         private Vector2 _originalAnchoredPosition;
         private float _maxDragRadius; // Max distance from the formation window's center
@@ -28,15 +28,14 @@ namespace Client.UI.Formation
             if (_rectTransform == null) _rectTransform = GetComponent<RectTransform>();
         }
 
-        public void Initialize(FormationUIMediator mediator, int shipEntityId, Vector2 initialAnchoredPosition, float maxDragRadiusFromCenter)
+        public void Initialize(FormationUI screen, int shipEntityId, Vector2 initialAnchoredPosition, float maxDragRadiusFromCenter)
         {
-            _mediator = mediator;
+            _formationUIScreen = screen; // Changed parameter type
             _shipEntityId = shipEntityId;
             _rectTransform.anchoredPosition = initialAnchoredPosition;
             _originalAnchoredPosition = initialAnchoredPosition;
             _maxDragRadius = maxDragRadiusFromCenter;
 
-            // Cache parent canvas for coordinate conversion during drag
             _parentCanvas = GetComponentInParent<Canvas>();
             if (_parentCanvas != null)
             {
@@ -50,50 +49,45 @@ namespace Client.UI.Formation
 
             if (shipInfoText != null)
             {
-                shipInfoText.text = _shipEntityId.ToString(); // Simple display
+                shipInfoText.text = _shipEntityId.ToString(); 
             }
-            // Potentially set a unique color/icon based on ship type if that data is available
         }
 
         public void OnBeginDrag(PointerEventData eventData)
         {
-            if (_mediator == null) return;
+            if (_formationUIScreen == null) return;
             _originalAnchoredPosition = _rectTransform.anchoredPosition;
-            if (backgroundImage != null) backgroundImage.color = Color.yellow; // Highlight while dragging
+            if (backgroundImage != null) backgroundImage.color = Color.yellow; 
 
-            // Optional: Bring to front if you have overlapping elements
-            // _rectTransform.SetAsLastSibling();
-            _mediator.OnShipSlotUIDragBegin(this);
+            _formationUIScreen.OnShipSlotUIDragBegin(this);
         }
 
         public void OnDrag(PointerEventData eventData)
         {
-            if (_mediator == null || _parentCanvas == null) return;
+            if (_formationUIScreen == null || _parentCanvas == null) return;
 
-            // Convert screen point to anchored position within the parent container (slotContainer)
             RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                _rectTransform.parent as RectTransform, // The direct parent container
+                _rectTransform.parent as RectTransform, 
                 eventData.position,
-                _parentCanvas.worldCamera, // Use canvas camera (null for ScreenSpaceOverlay)
+                _parentCanvas.worldCamera, 
                 out Vector2 localPoint
             );
 
-            // Clamp the position to be within the _maxDragRadius circle from the parent container's center (pivot assumed 0.5, 0.5)
             if (localPoint.magnitude > _maxDragRadius)
             {
                 localPoint = localPoint.normalized * _maxDragRadius;
             }
 
             _rectTransform.anchoredPosition = localPoint;
-            _mediator.OnShipSlotUIDragging(this);
+            _formationUIScreen.OnShipSlotUIDragging(this);
         }
 
         public void OnEndDrag(PointerEventData eventData)
         {
-            if (_mediator == null) return;
-            if (backgroundImage != null) backgroundImage.color = Color.white; // Reset highlight
+            if (_formationUIScreen == null) return;
+            if (backgroundImage != null) backgroundImage.color = Color.white; 
 
-            _mediator.OnShipSlotUIDragEnd(this);
+            _formationUIScreen.OnShipSlotUIDragEnd(this);
         }
 
         public void UpdatePosition(Vector2 newAnchoredPosition)
@@ -102,7 +96,6 @@ namespace Client.UI.Formation
             _originalAnchoredPosition = newAnchoredPosition;
         }
 
-        // Call this if the slot is being removed
         public void Dispose()
         {
             Destroy(gameObject);

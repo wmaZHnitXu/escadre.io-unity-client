@@ -1,9 +1,8 @@
 // Scripts/UI/RegistrationUI.cs
 using UnityEngine;
 using UnityEngine.UI;
-using Assets.Scripts.UILogic; // Убедитесь, что этот using нужен и правильный
+using Assets.Scripts.UILogic;
 using TMPro;
-// using Assets.Scripts.UILogic; // Дублирующийся using, можно убрать
 
 public class RegistrationUI : UIScreen
 {
@@ -22,7 +21,7 @@ public class RegistrationUI : UIScreen
     {
         base.Awake();
         uiManager = FindObjectOfType<UIManager>();
-        masterServerApiService = MasterServerApiService.Instance; // Используем Singleton Instance
+        masterServerApiService = MasterServerApiService.Instance;
         if (masterServerApiService == null)
         {
             Debug.LogError("MasterServerApiService not found in the scene or not initialized!");
@@ -40,10 +39,10 @@ public class RegistrationUI : UIScreen
         base.OnShow();
         Debug.Log("Registration Screen Shown.");
         
-        SetInteractable(true); // Убедимся, что UI интерактивен при показе
+        SetInteractable(true);
     }
 
-    private void ClearInputFields() // Новый вспомогательный метод
+    private void ClearInputFields()
     {
         emailInputField.text = "";
         nicknameInputField.text = "";
@@ -64,7 +63,7 @@ public class RegistrationUI : UIScreen
         string password = passwordInputField.text;
         string confirmPassword = confirmPasswordInputField.text;
 
-        if (string.IsNullOrWhiteSpace(email) || !IsValidEmail(email)) // Добавим простую валидацию email
+        if (string.IsNullOrWhiteSpace(email) || !IsValidEmail(email))
         {
             Debug.LogError("Invalid or empty email.");
             UIManager.Instance.ShowErrorScreen("Ошибка Регистрации", "Пожалуйста, введите корректный email.", null, UIScreenType.Registration);
@@ -76,7 +75,7 @@ public class RegistrationUI : UIScreen
             UIManager.Instance.ShowErrorScreen("Ошибка Регистрации", "Пожалуйста, введите никнейм.", null, UIScreenType.Registration);
             return;
         }
-        if (string.IsNullOrWhiteSpace(password) || password.Length < 6) // Пример минимальной длины пароля
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 6)
         {
             Debug.LogError("Password is too short (minimum 6 characters) or empty.");
             UIManager.Instance.ShowErrorScreen("Ошибка Регистрации", "Пароль должен содержать не менее 6 символов.", null, UIScreenType.Registration);
@@ -89,10 +88,9 @@ public class RegistrationUI : UIScreen
             return;
         }
 
-        SetInteractable(false); // Блокируем UI
+        SetInteractable(false);
         Debug.Log($"Attempting to register: Email='{email}', Nickname='{nickname}'");
 
-        // --- РЕАЛЬНЫЙ ВЫЗОВ ---
         if (masterServerApiService == null)
         {
             Debug.LogError("MasterServerApiService is not available for registration.");
@@ -102,26 +100,24 @@ public class RegistrationUI : UIScreen
             return;
         }
 
-        // Используем обновленный MasterServerApiService.RegisterAsync, который работает с событиями
         var (success, response, errorMessage) = await masterServerApiService.RegisterAsync(email, nickname, password);
 
         if (success)
         {
-            // response должен содержать IsSuccess от сервера (из RegistrationResultDto)
             if (response != null && response.IsSuccess) 
             {
                 Debug.Log($"Registration successful (client-side perspective): {errorMessage}");
                 ClearInputFields(); 
                 uiManager.SwitchToScreen(UIScreenType.EmailConfirmationSent);
             }
-            else // Регистрация на сервере не удалась (например, email занят)
+            else
             {
                 string serverError = "Неизвестная ошибка регистрации.";
                 if (response?.Errors != null && response.Errors.Length > 0)
                 {
                     serverError = string.Join("\n", response.Errors);
                 }
-                else if (!string.IsNullOrEmpty(errorMessage)) // Общая ошибка от TCS
+                else if (!string.IsNullOrEmpty(errorMessage))
                 {
                     serverError = errorMessage;
                 }
@@ -137,10 +133,9 @@ public class RegistrationUI : UIScreen
             UIManager.Instance.ShowErrorScreen("Ошибка Регистрации", errorMessage ?? "Не удалось отправить запрос на регистрацию.", null, UIScreenType.Registration);
             SetInteractable(true);
         }
-        // SetInteractable(true); // Разблокируем, если не было перехода на другой экран (уже сделано в else)
     }
     
-    private bool IsValidEmail(string email) // Простая проверка формата email
+    private bool IsValidEmail(string email)
     {
         try
         {
